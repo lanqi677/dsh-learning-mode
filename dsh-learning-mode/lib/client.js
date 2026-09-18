@@ -764,12 +764,30 @@ window.__ModuleLoader__.load({
 
 		// ── 小工具 ─────────────────────────────────────────────────────────
 		function rollup(node) {
-			// 子树的 {done,total}（44 个节点量级，渲染期直接算，不做缓存）
+			// 子树的 {done,total}，**含节点自己**（行内角标要的就是"这一支"含自己）
 			var done = node.status === "done" ? 1 : 0;
 			var total = 1;
 			var kids = node.children || [];
 			for (var i = 0; i < kids.length; i += 1) {
 				var inner = rollup(kids[i]);
+				done += inner.done;
+				total += inner.total;
+			}
+			return { done: done, total: total };
+		}
+
+		/**
+		 * 一组节点的合计，**不含任何"自己"** —— 面板顶部那行"整棵树的进度"用它。
+		 *
+		 * ⚠️ 别用 `rollup({ id:"root", children: tree.nodes })` 代替：rollup 会把传进来的
+		 * 那个节点也算 1 个，合成根会把总数**多算 1**（真机实拍：下拉框写 `1/45`、
+		 * 进度行写 `1/46`，同一棵树两个数）。行内角标必须继续用 rollup（那一支含自己才对）。
+		 */
+		function rollupAll(nodes) {
+			var done = 0;
+			var total = 0;
+			for (var i = 0; i < (nodes || []).length; i += 1) {
+				var inner = rollup(nodes[i]);
 				done += inner.done;
 				total += inner.total;
 			}
@@ -1058,7 +1076,7 @@ window.__ModuleLoader__.load({
 		function panelBody(sessionId, data, act, open, setOpen, closePanel, view, setView, review, reloadReview, openNotes, toggleNote, collapsed, toggleFold, newMarks, newCount, newTitles, notice, onJump, win) {
 			var trees = data.trees || [];
 			var tree = data.tree;
-			var stat = tree ? rollup({ id: "root", status: "todo", children: tree.nodes || [] }) : { done: 0, total: 0 };
+			var stat = tree ? rollupAll(tree.nodes || []) : { done: 0, total: 0 };
 			// 窗口几何（win = { geom, drag, reset }）：默认态贴右 + 自适应高；拖过之后变成显式 left/top/w/h
 			var geom = win !== null && win !== undefined && typeof win.geom === "object" && win.geom !== null ? win.geom : {};
 			var drag = win === null || win === undefined ? null : win.drag;
@@ -1382,7 +1400,7 @@ window.__ModuleLoader__.load({
 			if (err !== "") { log("state error:", err); }
 			if (data === null || data.enabled !== true) return null;
 
-			var stat = data.tree ? rollup({ id: "root", status: "todo", children: data.tree.nodes || [] }) : { done: 0, total: 0 };
+			var stat = data.tree ? rollupAll(data.tree.nodes || []) : { done: 0, total: 0 };
 			// "新增"判定：面板开着用冻结的水位线（新增会一直标着），关着用最新的 seenAt
 			var badgeSince = open === null ? (typeof data.seenAt === "string" ? data.seenAt : null) : (frozenSeen !== null ? frozenSeen : (typeof data.seenAt === "string" ? data.seenAt : null));
 			var newMarks = data.tree ? newInfo(data.tree, badgeSince) : { ids: {}, count: 0, titles: [] };

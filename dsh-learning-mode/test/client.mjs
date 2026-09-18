@@ -850,5 +850,27 @@ hookQueue = [STATE_WITH_NEW, '', null, 'tree', null]
 const backChip = textOf(Chip({ sessionId: 's1' }))
 check('切回中文：入口按钮回到「学习树」', backChip.includes('学习树') && !backChip.includes('Learning Tree'), backChip.slice(0, 200))
 
+// ══ 整棵树的进度不能把"合成根"算进去 ═══════════════════════════════════════
+// 真机实拍 bug：下拉框写 `Dream-RSI 1/45`，进度行写 `1/46` —— 同一棵树两个数。
+// 根因：顶部这行原来算的是 `rollup({ id:"root", children: tree.nodes })`，
+// 而 rollup 会把传进去的那个节点也算 1 个，合成根于是**多算 1**。
+// 行内角标必须继续含自己（「1 背景与动机」显示 1/8 是对的），所以修法是加一个
+// 不含自己的 rollupAll，只给顶部这两处用。
+const ONE_NODE = {
+  ...STATE,
+  trees: [{ id: 't1', title: 'T1', total: 1, done: 1, lastUsedAt: null }],
+  tree: { id: 't1', title: 'T1', nodes: [{ id: 'only', title: 'OnlyNode', status: 'done', note: 'n', noteState: 'done', children: [] }] },
+}
+hookQueue = [ONE_NODE, '', 'panel', 'tree', null]
+const oneText = textOf(Chip({ sessionId: 's1' }))
+check('整棵树 1 个节点显示 1/1（不是 1/2：合成根不该被算进去）',
+  oneText.includes('1/1') && !oneText.includes('1/2'), oneText.slice(0, 240))
+
+// 同时确认行内角标仍然"含自己"（那一支的进度本来就该把该节点算进去）
+hookQueue = [STATE, '', 'panel', 'tree', null]
+const branchText = textOf(Chip({ sessionId: 's1' }))
+check('行内角标仍含自己：Java 这一支 2/3（Java + 对象 + 语法）',
+  branchText.includes('2/3'), branchText.slice(0, 240))
+
 console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURES')
 process.exit(failures === 0 ? 0 : 1)
