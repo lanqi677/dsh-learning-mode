@@ -1,0 +1,130 @@
+{
+  "id": "tutorial",
+  "title": "如何使用学习模式",
+  "createdAt": "2026-09-17T14:16:06.905Z",
+  "nodes": [
+    {
+      "id": "nebphxsmz",
+      "title": "① 问我：我要学 X，要学什么",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": [
+        {
+          "id": "nyblitl9b",
+          "title": "AI 会把清单直接生成到左侧/右侧的树里",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        },
+        {
+          "id": "n03vhjm39",
+          "title": "不用你手动建节点，也不用复制粘贴",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "n79yavl9l",
+      "title": "② 点节点标题 = 聚焦",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": [
+        {
+          "id": "nn8qjmsex",
+          "title": "聚焦后，对话就围绕这个节点展开",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        },
+        {
+          "id": "na8kbg41f",
+          "title": "也可以直接对我说\"我们来看继承\"",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "ndqew1qxh",
+      "title": "③ 点 [✓ 学会] 标记完成",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": [
+        {
+          "id": "nmsbknnmv",
+          "title": "标完成时我会自动写一句摘要，方便以后复习",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        },
+        {
+          "id": "n0hy05714",
+          "title": "再点一次可以撤销",
+          "status": "todo",
+          "order": 0,
+          "note": "",
+          "noteAt": null,
+          "doneAt": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "n982jtplh",
+      "title": "④ 钻进细节就用 [聚焦]，回到上层直接点父节点",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": []
+    },
+    {
+      "id": "n4rzleh9l",
+      "title": "⑤ 想改结构（改名/移位/删除）直接跟我说",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": []
+    },
+    {
+      "id": "n23ea3g67",
+      "title": "⑥ 换树：点顶部的树名下拉框",
+      "status": "todo",
+      "order": 0,
+      "note": "",
+      "noteAt": null,
+      "doneAt": null,
+      "children": []
+    }
+  ]
+}

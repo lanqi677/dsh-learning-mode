@@ -1,0 +1,15 @@
+# dsh-learning-mode bundle patch
+#
+# ⚠️ 行名**必须是包根**（'dsh-learning-mode'），不能写子路径。
+#   @deepseek-ai/dsh-client-modules 用 exactPackageSpecifier() 定位包清单：
+#   含 "/" 的说明符一律返回 undefined（"or undefined for a subpath"），
+#   于是该行被判定为"不是客户端包"并**整个跳过**，浏览器半边永远不会被加载。
+#   （真实踩过：写成 'dsh-learning-mode/client-host' → 前端毫无反应，且没有任何报错。）
+#
+# 行挂的是 package.json 的 main = lib/client-host.js —— 一个**空插件**，什么都不注册。
+# 它存在的唯一目的就是让扫描发现本包声明了 dsh.client。
+# 真正的工具与提示段在 lib/index.js，只由「学习模式」agent 预设以 file: 说明符挂载，
+# 因此绝不会在 host 平面全局注册（那会让 7 个 outline_* 工具出现在所有会话里）。
+- insert:
+    - id: learning-mode-client-host
+      name: 'dsh-learning-mode'
