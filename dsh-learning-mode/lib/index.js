@@ -31,11 +31,47 @@ import {
   renderTreeLines,
 } from './store.js'
 import { SummaryPipeline } from './summary.js'
+import { setLocale, t } from './i18n.js'
 
 export const name = 'dsh-learning-mode'
 export const inject = ['tools', 'systemPrompt']
 
 const RPC_PATH = '/api/learning-mode/rpc'
+
+/**
+ * 浏览器半边最近一次上报的语言（RPC body 里的 `payload.locale`）。
+ *
+ * 为什么需要它：DSH 的语言偏好存在 host settings 的 `locale` 命名空间里，
+ * 但**没显式设置过时是"交给浏览器决定"的**（按 Accept-Language 排），host 拿不到那个结果。
+ * 浏览器半边每轮轮询都会把真正生效的 active locale 带上来，所以以它为准。
+ */
+let clientLocale = ''
+
+/**
+ * 把当前语言同步进 i18n 模块（模型侧文案都在 host 生成，必须知道语言）。
+ * 优先级：
+ *   ① 客户端上报过 → 用它（浏览器里**真实生效**的那个）
+ *   ② settings 里显式的 `locale.preference` → 用它（用户在设置里手动选过）
+ *   ③ 都没有 → 保持默认 zh（行为与升级前一致）
+ *
+ * ⚠️ 工具 description 是 `defineTool()` 时**取值定型**的（框架要求字符串，不支持 getter），
+ * 所以只在 apply 时同步一次；而每轮注入块、工具返回值、摘要提示词都是**调用时**取值，
+ * 会在下面每轮再同步一次，跟着语言走。
+ */
+function syncLocale(ctx) {
+  if (clientLocale !== '') { setLocale(clientLocale); return }
+  try {
+    const settings = typeof ctx.get === 'function' ? ctx.get('settings') : undefined
+    const section = settings !== undefined && settings !== null && typeof settings.get === 'function'
+      ? settings.get('locale')
+      : undefined
+    if (section !== undefined && section !== null && typeof section.preference === 'string' && section.preference !== '') {
+      setLocale(section.preference)
+      return
+    }
+  } catch { /* settings 缺席（headless 组合）就用默认 */ }
+  setLocale('zh')
+}
 
 /**
  * 所有工具的统一输出声明：单纯的字符串正文。
@@ -49,44 +85,46 @@ const TEXT_OUTPUT = {
 const SECTION_ORDER = 8500
 
 const RULES = [
-  '# 学习模式（当前会话已开启）',
+  t('# 学习模式（当前会话已开启）'),
   '',
-  '本会话有一棵「学习树」：节点=知识点，用户在右侧面板聚焦/标完成，每个节点带一句摘要。',
+  t('本会话有一棵「学习树」：节点=知识点，用户在右侧面板聚焦/标完成，每个节点带一句摘要。'),
   '',
-  '## 第一优先级：静默整理（用户不想为"记笔记"操心）',
-  '- 每次解答完一个问题后，把**这个问题引入的知识点**用 `outline_capture` 挂到**当前聚焦节点**下面。',
-  '- **`outline_capture` 不搬焦点**（默认就是不动）：焦点＝"用户在看哪"，**只有用户能改变它**（面板点击，或用户的话明确指向别的节点）。你顺手整理时如果搬了焦点，用户的"我在哪"就被你的列举牵着走了。',
-  '- **焦点什么时候该动**：① 用户的话明确指向某个**已有节点** → 先 `outline_focus` 它再回答；② 用户这一问的主题就是一个**新知识点**（他问的就是它）→ `outline_capture({ focus: true })`。除此之外都不动焦点。',
-  '- **子概念只点到为止**：回答的主体永远是当前聚焦节点。顺带引入的子概念挂上去 + 一两句交代"它是什么、为什么在这儿"就够了，**不要**在同一条回答里替用户把它展开成完整的一节——他想深入会自己点进去或问你。',
-  '- **发散优先于体系**：用户由「数组」问到「计算机地址」，就把「计算机地址」挂在「数组」下面（即使它是前置知识），**不要**为了"体系正确"挪到别处——树记录的是当时的思路路径。',
-  '- **不要向用户报告**：不写"已添加 X"、不复述树、不问要不要记录。只有确实引入了新知识点才 capture；寒暄、元问题、纯确认不 capture。',
-  '- 一轮最多 capture 一个节点，不要为了整齐批量补全。',
-  '- **摘要不用你写**：只有用户点 [✓ 学会]（或你调 `outline_done`）时，插件才会自动生成摘要。不要在聊天里替用户总结、也不要为了摘要而标完成。',
+  t('## 第一优先级：静默整理（用户不想为"记笔记"操心）'),
+  t('- 每次解答完一个问题后，把**这个问题引入的知识点**用 `outline_capture` 挂到**当前聚焦节点**下面。'),
+  t('- **`outline_capture` 不搬焦点**（默认就是不动）：焦点＝"用户在看哪"，**只有用户能改变它**（面板点击，或用户的话明确指向别的节点）。你顺手整理时如果搬了焦点，用户的"我在哪"就被你的列举牵着走了。'),
+  t('- **焦点什么时候该动**：① 用户的话明确指向某个**已有节点** → 先 `outline_focus` 它再回答；② 用户这一问的主题就是一个**新知识点**（他问的就是它）→ `outline_capture({ focus: true })`。除此之外都不动焦点。'),
+  t('- **子概念只点到为止**：回答的主体永远是当前聚焦节点。顺带引入的子概念挂上去 + 一两句交代"它是什么、为什么在这儿"就够了，**不要**在同一条回答里替用户把它展开成完整的一节——他想深入会自己点进去或问你。'),
+  t('- **发散优先于体系**：用户由「数组」问到「计算机地址」，就把「计算机地址」挂在「数组」下面（即使它是前置知识），**不要**为了"体系正确"挪到别处——树记录的是当时的思路路径。'),
+  t('- **不要向用户报告**：不写"已添加 X"、不复述树、不问要不要记录。只有确实引入了新知识点才 capture；寒暄、元问题、纯确认不 capture。'),
+  t('- 一轮最多 capture 一个节点，不要为了整齐批量补全。'),
+  t('- **摘要不用你写**：只有用户点 [✓ 学会]（或你调 `outline_done`）时，插件才会自动生成摘要。不要在聊天里替用户总结、也不要为了摘要而标完成。'),
   '',
-  '## 元决策：一律用 ask_user_question 出选项，不要用对话来回问',
-  '- 选哪棵树 / 要不要新建 / 树叫什么 这类**与学习内容无关**的确认，**必须**用 `ask_user_question` 给结构化选项'
-    + '（第一个＝你推荐的那项，label 后加「(Recommended)」），让用户一点就完，用户也可以自己填。',
-  '- 理由（用户的明确要求）：这些往返会在上下文里留下噪音、也让用户分心。**不要**用普通对话问、不要聊两轮才定下来。',
-  '- 只有"必须澄清才能继续"的**学习内容**问题，才用普通方式问。',
+  t('## 元决策：一律用 ask_user_question 出选项，不要用对话来回问'),
+  // ⚠️ 这句原来是两行字符串拼接。**必须写成单个字面量**：test/i18n.mjs 只抓
+  // `t('…')` 的第一个字面量，拼接会把 key 截成半句，导致守卫报"这个 key 不在 EN 里"，
+  // 而真正要翻的是完整一句。
+  t('- 选哪棵树 / 要不要新建 / 树叫什么 这类**与学习内容无关**的确认，**必须**用 `ask_user_question` 给结构化选项（第一个＝你推荐的那项，label 后加「(Recommended)」），让用户一点就完，用户也可以自己填。'),
+  t('- 理由（用户的明确要求）：这些往返会在上下文里留下噪音、也让用户分心。**不要**用普通对话问、不要聊两轮才定下来。'),
+  t('- 只有"必须澄清才能继续"的**学习内容**问题，才用普通方式问。'),
   '',
-  '## 其它',
-  '1. **用户的话没指明对象时（"介绍/讲讲/继续/详细说说/然后呢"），说的就是当前聚焦节点**——不要跳到"这一层还没学完"里别的知识点，也不要反过来问"你想了解哪个"（除非确实没有聚焦节点）。',
-  '2. 用户问"X 要学什么"：先 `outline_show` 查重 → `outline_add` 只补缺失 → 1-2 句说明，不复述整棵树。',
-  '3. 用户说"学完了"：`outline_done`（可带一句 note）。你自己判断的先问一句。',
-  '4. 改结构（改名/移位/删除）用 `outline_update`，不要重建已有节点。',
-  '5. 不要为"整齐"重构已有树。',
-  '6. 用户说"复习 / 我学过什么"：`outline_review` 读摘要，按摘要复述要点，不要重讲。',
-  '7. 节点地址=标题路径，例如 "数据结构/数组/计算机地址"；标题里可能自带 `/`（如"插入/删除"），照原样写即可。',
+  t('## 其它'),
+  t('1. **用户的话没指明对象时（"介绍/讲讲/继续/详细说说/然后呢"），说的就是当前聚焦节点**——不要跳到"这一层还没学完"里别的知识点，也不要反过来问"你想了解哪个"（除非确实没有聚焦节点）。'),
+  t('2. 用户问"X 要学什么"：先 `outline_show` 查重 → `outline_add` 只补缺失 → 1-2 句说明，不复述整棵树。'),
+  t('3. 用户说"学完了"：`outline_done`（可带一句 note）。你自己判断的先问一句。'),
+  t('4. 改结构（改名/移位/删除）用 `outline_update`，不要重建已有节点。'),
+  t('5. 不要为"整齐"重构已有树。'),
+  t('6. 用户说"复习 / 我学过什么"：`outline_review` 读摘要，按摘要复述要点，不要重讲。'),
+  t('7. 节点地址=标题路径，例如 "数据结构/数组/计算机地址"；标题里可能自带 `/`（如"插入/删除"），照原样写即可。'),
 ].join('\n')
 
 const USAGE = [
-  '① 直接问我：「我要学 Java，要学什么」——清单会自动长到上面的树里。',
-  '② 你问什么、我答什么，树就顺着**你的思路**往下长：由「数组」问出「计算机地址」，它就挂在数组下面，不按教科书目录摆放。',
-  '③ 点节点标题 = 聚焦（之后的对话围绕这个节点）；点 [⟳] 让模型重写该节点摘要。',
-  '④ 点 [✓ 学会] 标记完成：会写一句复习摘要，**并自动回到上一层**（父节点）——钻进概念学完就能原地返回。',
-  '⑤ 点 [复习] 看已完成知识点 + 摘要——不用翻聊天记录。',
-  '⑥ 想改名 / 挪位置 / 删除，直接跟我说，不要手动改文件。',
-  '⑦ 顶部下拉框可以切换 / 新建学习树。',
+  t('① 直接问我：「我要学 Java，要学什么」——清单会自动长到上面的树里。'),
+  t('② 你问什么、我答什么，树就顺着**你的思路**往下长：由「数组」问出「计算机地址」，它就挂在数组下面，不按教科书目录摆放。'),
+  t('③ 点节点标题 = 聚焦（之后的对话围绕这个节点）；点 [⟳] 让模型重写该节点摘要。'),
+  t('④ 点 [✓ 学会] 标记完成：会写一句复习摘要，**并自动回到上一层**（父节点）——钻进概念学完就能原地返回。'),
+  t('⑤ 点 [复习] 看已完成知识点 + 摘要——不用翻聊天记录。'),
+  t('⑥ 想改名 / 挪位置 / 删除，直接跟我说，不要手动改文件。'),
+  t('⑦ 顶部下拉框可以切换 / 新建学习树。'),
 ].join('\n')
 
 function rootDir() {
@@ -190,6 +228,8 @@ function textOf(result) {
 }
 
 export function apply(ctx) {
+  // 先把语言定下来：工具 description 在这一步就会被 defineTool 取值定型。
+  syncLocale(ctx)
   const store = new LearningStore(rootDir())
   let ready = false
   const readyPromise = Promise.resolve()
@@ -332,6 +372,9 @@ export function apply(ctx) {
     text: (context) => {
       try {
         if (!ready) { noteInjectDiag('not-ready'); return '' }
+        // 每轮注入都重新对齐语言：浏览器半边可能刚把 active locale 换了（用户切语言），
+        // 而这段注入块是**调用时**拼的，跟着走才对。
+        syncLocale(ctx)
         let agent = context !== null && typeof context === 'object' ? context.agent : undefined
         if (agent === undefined || agent === null) {
           // 兜底：极少数装配路径可能不带 agent 参数（其它插件手动 assemble）。
@@ -450,7 +493,7 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_projects',
     output: TEXT_OUTPUT,
-    description: '列出所有学习树，以及当前会话绑定的是哪一棵。用于首轮确认要学哪棵树。',
+    description: t('列出所有学习树，以及当前会话绑定的是哪一棵。用于首轮确认要学哪棵树。'),
     parameters: {},
     async execute(_args, exec) {
       await awaitReady()
@@ -458,10 +501,10 @@ export function apply(ctx) {
       const binding = store.binding(sid)
       return textOf({
         current: binding === null ? null : { treeId: binding.treeId, focus: binding.focus || '' },
-        trees: store.listTrees().map((t) => {
-          const tree = store.readTree(t.id)
+        trees: store.listTrees().map((entry) => {
+          const tree = store.readTree(entry.id)
           const stat = tree === null ? { total: 0, done: 0 } : countNodes(tree.nodes)
-          return { id: t.id, title: t.title, done: stat.done, total: stat.total, lastUsedAt: t.lastUsedAt }
+          return { id: entry.id, title: entry.title, done: stat.done, total: stat.total, lastUsedAt: entry.lastUsedAt }
         }),
       })
     },
@@ -470,10 +513,10 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_open',
     output: TEXT_OUTPUT,
-    description: '把当前会话绑定到某一棵学习树；或新建一棵树并绑定。首次使用学习模式时先调用它。',
+    description: t('把当前会话绑定到某一棵学习树；或新建一棵树并绑定。首次使用学习模式时先调用它。'),
     parameters: {
-      project: { type: 'string', description: '已有树的 id 或标题。与 new 二选一。' },
-      new: { type: 'string', description: '新建一棵树并绑定，值为树名（例如 "Java"）。与 project 二选一。' },
+      project: { type: 'string', description: t('已有树的 id 或标题。与 new 二选一。') },
+      new: { type: 'string', description: t('新建一棵树并绑定，值为树名（例如 "Java"）。与 project 二选一。') },
     },
     async execute(args, exec) {
       await awaitReady()
@@ -486,36 +529,36 @@ export function apply(ctx) {
       }
       if (typeof args.project === 'string' && args.project.trim() !== '') {
         const wanted = args.project.trim()
-        const hit = store.listTrees().find((t) => t.id === wanted || t.title === wanted)
-        if (hit === undefined) return textOf({ ok: false, error: '找不到学习树：' + wanted })
+        const hit = store.listTrees().find((entry) => entry.id === wanted || entry.title === wanted)
+        if (hit === undefined) return textOf({ ok: false, error: t('找不到学习树：{project}', { project: wanted }) })
         await store.switchTree(sid, hit.id)
         await store.markOpened(sid)
         return textOf({ ok: true, opened: { id: hit.id, title: hit.title } })
       }
-      return textOf({ ok: false, error: '请提供 project（已有树）或 new（新建树）' })
+      return textOf({ ok: false, error: t('请提供 project（已有树）或 new（新建树）') })
     },
   }))
 
   ctx.tools.register(defineTool({
     name: 'outline_show',
     output: TEXT_OUTPUT,
-    description: '读取当前学习树的清单。**建树前必须先调用它查重。** 返回缩进清单：[ ]未完成 [>]进行中 [x]已完成。',
+    description: t('读取当前学习树的清单。**建树前必须先调用它查重。** 返回缩进清单：[ ]未完成 [>]进行中 [x]已完成。'),
     parameters: {
-      path: { type: 'string', description: '可选：只看某个节点下的子树，例如 "Java/对象"。省略则看整棵树。' },
-      include_done: { type: 'boolean', description: '是否包含已完成节点，默认 true。' },
+      path: { type: 'string', description: t('可选：只看某个节点下的子树，例如 "Java/对象"。省略则看整棵树。') },
+      include_done: { type: 'boolean', description: t('是否包含已完成节点，默认 true。') },
     },
     async execute(args, exec) {
       await awaitReady()
       const binding = store.binding(sessionIdOf(exec))
-      if (binding === null || typeof binding.treeId !== 'string') return '尚未绑定学习树。先调用 outline_projects 看看有没有现成的树，或 outline_open 新建。'
+      if (binding === null || typeof binding.treeId !== 'string') return t('尚未绑定学习树。先调用 outline_projects 看看有没有现成的树，或 outline_open 新建。')
       const tree = store.readTree(binding.treeId)
-      if (tree === null) return '学习树文件缺失：' + binding.treeId
+      if (tree === null) return t('学习树文件缺失：{treeId}', { treeId: binding.treeId })
       const from = typeof args.path === 'string' && args.path.trim() !== '' ? findNode(tree, args.path) : null
       const nodes = from === null ? tree.nodes : from.children
       const lines = renderTreeLines(nodes, { includeDone: args.include_done !== false, maxDepth: 6 })
       const stat = countNodes(tree.nodes)
-      const head = '树：' + tree.title + '（已完成 ' + stat.done + '/' + stat.total + '）'
-      if (lines.length === 0) return head + '\n(空)'
+      const head = t('树：{title}（已完成 {done}/{total}）', { title: tree.title, done: stat.done, total: stat.total })
+      if (lines.length === 0) return head + '\n' + t('(空)')
       return head + '\n' + lines.join('\n')
     },
   }))
@@ -523,15 +566,15 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_add',
     output: TEXT_OUTPUT,
-    description: '在学习树的某个节点下追加子项（幂等：同名兄弟已存在会跳过并回报）。parent 省略表示加在根上。',
+    description: t('在学习树的某个节点下追加子项（幂等：同名兄弟已存在会跳过并回报）。parent 省略表示加在根上。'),
     parameters: {
-      parent: { type: 'string', description: '父节点标题路径，例如 "Java/对象"。省略表示加在根上。' },
-      items: { type: 'array', items: { type: 'string' }, required: true, description: '要新增的子项标题列表。' },
+      parent: { type: 'string', description: t('父节点标题路径，例如 "Java/对象"。省略表示加在根上。') },
+      items: { type: 'array', items: { type: 'string' }, required: true, description: t('要新增的子项标题列表。') },
     },
     async execute(args, exec) {
       await awaitReady()
       const items = Array.isArray(args.items) ? args.items : []
-      if (items.length === 0) return 'items 为空，没有新增。'
+      if (items.length === 0) return t('items 为空，没有新增。')
       const result = await store.addNodes(sessionIdOf(exec), typeof args.parent === 'string' ? args.parent : '', items)
       return textOf(result)
     },
@@ -540,12 +583,12 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_update',
     output: TEXT_OUTPUT,
-    description: '调整学习树结构：改名、挪位置、删除。用户要求整理结构时使用，不要重建节点。',
+    description: t('调整学习树结构：改名、挪位置、删除。用户要求整理结构时使用，不要重建节点。'),
     parameters: {
-      node: { type: 'string', required: true, description: '目标节点标题路径，例如 "Java/对象/私有"。' },
-      rename: { type: 'string', description: '改成的新闻标题。' },
-      move_to: { type: 'string', description: '移动到哪个父节点下（标题路径；空字符串表示移到根）。' },
-      delete: { type: 'boolean', description: '为 true 时删除该节点及其子树。' },
+      node: { type: 'string', required: true, description: t('目标节点标题路径，例如 "Java/对象/私有"。') },
+      rename: { type: 'string', description: t('改成的新闻标题。') },
+      move_to: { type: 'string', description: t('移动到哪个父节点下（标题路径；空字符串表示移到根）。') },
+      delete: { type: 'boolean', description: t('为 true 时删除该节点及其子树。') },
     },
     async execute(args, exec) {
       await awaitReady()
@@ -553,7 +596,7 @@ export function apply(ctx) {
       if (typeof args.rename === 'string') changes.rename = args.rename
       if (typeof args.move_to === 'string') changes.moveTo = args.move_to
       if (args.delete === true) changes.delete = true
-      if (Object.keys(changes).length === 0) return '没有指定任何修改（rename / move_to / delete）。'
+      if (Object.keys(changes).length === 0) return t('没有指定任何修改（rename / move_to / delete）。')
       const result = await store.updateNode(sessionIdOf(exec), String(args.node || ''), changes)
       return textOf(result)
     },
@@ -562,11 +605,11 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_capture',
     output: TEXT_OUTPUT,
-    description: '把刚学到的知识点就地挂进学习树：默认挂在**当前聚焦节点**下面，**焦点留在原地不动**（焦点＝用户在看哪，只有用户能改变它）。这是"无感整理"用的工具——顺着用户当时的思路挂，不必符合知识体系；同名节点自动复用。输出极简，不要向用户复述。',
+    description: t('把刚学到的知识点就地挂进学习树：默认挂在**当前聚焦节点**下面，**焦点留在原地不动**（焦点＝用户在看哪，只有用户能改变它）。这是"无感整理"用的工具——顺着用户当时的思路挂，不必符合知识体系；同名节点自动复用。输出极简，不要向用户复述。'),
     parameters: {
-      title: { type: 'string', required: true, description: '知识点标题，尽量短，例如 "计算机地址"。' },
-      under: { type: 'string', description: '可选：显式指定父节点标题路径。省略 = 当前聚焦节点。' },
-      focus: { type: 'boolean', description: '默认 false＝只挂节点、不动焦点。**只有"用户这一问的主题就是它"**（他问的就是这个新知识点，你替他移动视线）时才传 true；节点已存在时改用 outline_focus。' },
+      title: { type: 'string', required: true, description: t('知识点标题，尽量短，例如 "计算机地址"。') },
+      under: { type: 'string', description: t('可选：显式指定父节点标题路径。省略 = 当前聚焦节点。') },
+      focus: { type: 'boolean', description: t('默认 false＝只挂节点、不动焦点。**只有"用户这一问的主题就是它"**（他问的就是这个新知识点，你替他移动视线）时才传 true；节点已存在时改用 outline_focus。') },
     },
     async execute(args, exec) {
       await awaitReady()
@@ -589,11 +632,11 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_done',
     output: TEXT_OUTPUT,
-    description: '把某个知识点标记为学会 / 取消学会，可附带一句摘要（note）留作复习。不带 note 时插件会自动生成摘要。',
+    description: t('把某个知识点标记为学会 / 取消学会，可附带一句摘要（note）留作复习。不带 note 时插件会自动生成摘要。'),
     parameters: {
-      node: { type: 'string', required: true, description: '节点标题路径。' },
-      note: { type: 'string', description: '可选：这次学到的核心结论 / 易错点，供以后复习。不填则由插件自动总结。' },
-      undo: { type: 'boolean', description: '为 true 时取消完成状态。' },
+      node: { type: 'string', required: true, description: t('节点标题路径。') },
+      note: { type: 'string', description: t('可选：这次学到的核心结论 / 易错点，供以后复习。不填则由插件自动总结。') },
+      undo: { type: 'boolean', description: t('为 true 时取消完成状态。') },
     },
     async execute(args, exec) {
       await awaitReady()
@@ -607,19 +650,22 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_focus',
     output: TEXT_OUTPUT,
-    description: '切换当前聚焦的知识点（等价于用户在面板里点某个节点）。之后的对话围绕它展开。',
+    description: t('切换当前聚焦的知识点（等价于用户在面板里点某个节点）。之后的对话围绕它展开。'),
     parameters: {
-      node: { type: 'string', required: true, description: '节点标题路径；传 "根" 或空字符串表示回到整棵树。' },
+      node: { type: 'string', required: true, description: t('节点标题路径；传 "根" 或空字符串表示回到整棵树。') },
     },
     async execute(args, exec) {
       await awaitReady()
       const sid = sessionIdOf(exec)
       const raw = String(args.node || '')
-      const path = raw === '根' || raw === '(根)' ? '' : raw
+      // 回到整棵树的哨兵值：中文界面用"根"，英文界面用 "root"（英文参数说明里写的就是它）。
+      // ⚠️ 这两个是**内部判断标识**，不参与 i18n；但英文描述既然承诺了 "root"，
+      // 运行时就必须真的认它，否则英文会话里模型照说明传值会失败。
+      const path = raw === '根' || raw === '(根)' || raw.trim().toLowerCase() === 'root' ? '' : raw
       const binding = store.binding(sid)
       if (binding !== null && typeof binding.treeId === 'string' && path !== '') {
         const tree = store.readTree(binding.treeId)
-        if (tree !== null && findNode(tree, path) === null) return textOf({ ok: false, error: '找不到节点：' + path })
+        if (tree !== null && findNode(tree, path) === null) return textOf({ ok: false, error: t('找不到节点：{path}', { path: path }) })
       }
       await store.setFocus(sid, path)
       // 注意：**不**在离开旧节点时生成摘要。
@@ -632,26 +678,30 @@ export function apply(ctx) {
   ctx.tools.register(defineTool({
     name: 'outline_review',
     output: TEXT_OUTPUT,
-    description: '复习视图：列出当前学习树里已完成的知识点及其摘要（按完成时间倒序）。用户说"复习 / 我之前学过什么"时用。',
+    description: t('复习视图：列出当前学习树里已完成的知识点及其摘要（按完成时间倒序）。用户说"复习 / 我之前学过什么"时用。'),
     parameters: {
-      limit: { type: 'number', description: '最多返回多少条，默认 30。' },
-      missing_note_only: { type: 'boolean', description: '为 true 时只列"已完成但没有摘要"的节点。' },
+      limit: { type: 'number', description: t('最多返回多少条，默认 30。') },
+      missing_note_only: { type: 'boolean', description: t('为 true 时只列"已完成但没有摘要"的节点。') },
     },
     async execute(args, exec) {
       await awaitReady()
       const view = store.review(sessionIdOf(exec))
-      if (view.tree === null) return '尚未绑定学习树。'
+      if (view.tree === null) return t('尚未绑定学习树。')
       let items = view.items
       if (args.missing_note_only === true) items = items.filter((item) => item.note === '')
       const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 30
       const shown = items.slice(0, limit)
-      const head = '树：' + view.tree.title + '（已完成 ' + view.stats.done + '/' + view.stats.total
-        + '，其中有摘要 ' + view.stats.withNote + '）'
-      if (shown.length === 0) return head + '\n(还没有已完成的知识点)'
+      const head = t('树：{title}（已完成 {done}/{total}，其中有摘要 {withNote}）', {
+        title: view.tree.title,
+        done: view.stats.done,
+        total: view.stats.total,
+        withNote: view.stats.withNote,
+      })
+      if (shown.length === 0) return head + '\n' + t('(还没有已完成的知识点)')
       const lines = shown.map((item, index) => {
         const when = typeof item.doneAt === 'string' && item.doneAt.length >= 10 ? item.doneAt.slice(0, 10) : '—'
-        const note = item.note === '' ? (item.noteState === 'pending' ? '(摘要生成中/待补)' : '(无摘要)') : item.note
-        return (index + 1) + '. ' + item.path + '（' + when + '）\n   ' + note
+        const note = item.note === '' ? (item.noteState === 'pending' ? t('(摘要生成中/待补)') : t('(无摘要)')) : item.note
+        return t('{index}. {path}（{when}）\n   {note}', { index: index + 1, path: item.path, when: when, note: note })
       })
       return head + '\n' + lines.join('\n')
     },
@@ -690,6 +740,16 @@ async function handleRpc(scope, store, awaitReady, hooks, request, response) {
     return respond(400, { ok: false, error: 'bad-request' })
   }
   const sid = typeof payload.sessionId === 'string' ? payload.sessionId : ''
+  // 浏览器半边每轮 RPC 都会带 locale 上来 —— 这是 host 拿到"浏览器里真正生效的语言"的
+  // 唯一通道（settings 没显式存过时，语言是浏览器按 Accept-Language 定的，host 看不到）。
+  // 拿到就立刻对齐，让每轮注入块 / 工具回执 / 摘要提示词跟着界面语言走。
+  if (typeof payload.locale === 'string' && payload.locale !== '') {
+    if (payload.locale !== clientLocale) {
+      clientLocale = payload.locale
+      logRpc(store, 'locale=' + clientLocale)
+    }
+    setLocale(clientLocale)
+  }
   logRpc(store, 'op=' + String(payload.op || 'state') + ' session=' + sid.slice(0, 18))
   if (sid === '') return respond(400, { ok: false, error: 'missing-session' })
   const session = scope.sessions.get(sid)
@@ -707,10 +767,10 @@ async function dispatch(store, sid, session, payload, hooks) {
   if (op === 'state') {
     const binding = store.binding(sid)
     const enabled = binding !== null && binding.enabled === true
-    const trees = store.listTrees().map((t) => {
-      const tree = store.readTree(t.id)
+    const trees = store.listTrees().map((entry) => {
+      const tree = store.readTree(entry.id)
       const stat = tree === null ? { total: 0, done: 0 } : countNodes(tree.nodes)
-      return { id: t.id, title: t.title, total: stat.total, done: stat.done, lastUsedAt: t.lastUsedAt }
+      return { id: entry.id, title: entry.title, total: stat.total, done: stat.done, lastUsedAt: entry.lastUsedAt }
     })
     if (!enabled) return { ok: true, enabled: false }
     const tree = binding !== null && typeof binding.treeId === 'string' ? store.readTree(binding.treeId) : null
@@ -738,17 +798,17 @@ async function dispatch(store, sid, session, payload, hooks) {
   if (op === 'seen') {
     // 面板打开/关闭时调用：把"已看过"水位线推到 now（payload.at 可显式指定）。
     const stamp = await store.markSeen(sid, typeof payload.at === 'string' ? payload.at : undefined)
-    return stamp === null ? { ok: false, error: '尚未绑定学习树' } : { ok: true, seenAt: stamp.seenAt }
+    return stamp === null ? { ok: false, error: t('尚未绑定学习树') } : { ok: true, seenAt: stamp.seenAt }
   }
   if (op === 'open') {
-    const hit = store.listTrees().find((t) => t.id === payload.treeId || t.title === payload.treeId)
-    if (hit === undefined) return { ok: false, error: '找不到学习树' }
+    const hit = store.listTrees().find((entry) => entry.id === payload.treeId || entry.title === payload.treeId)
+    if (hit === undefined) return { ok: false, error: t('找不到学习树') }
     await store.switchTree(sid, hit.id)
     await store.markOpened(sid)
     return { ok: true }
   }
   if (op === 'create') {
-    const title = typeof payload.title === 'string' && payload.title.trim() !== '' ? payload.title.trim() : '新学习树'
+    const title = typeof payload.title === 'string' && payload.title.trim() !== '' ? payload.title.trim() : t('新学习树')
     const tree = await store.createTree(title)
     await store.switchTree(sid, tree.id)
     await store.markOpened(sid)
@@ -757,13 +817,13 @@ async function dispatch(store, sid, session, payload, hooks) {
   if (op === 'focus') {
     // 面板点选带 node id（标题可能含 `/`，路径有歧义）；工具/脚本走路径。
     const target = store.resolvePath(sid, payload.id, payload.path)
-    if (target === null) return { ok: false, error: '找不到节点' }
+    if (target === null) return { ok: false, error: t('找不到节点') }
     await store.setFocus(sid, target)
     return { ok: true, focus: target }
   }
   if (op === 'done') {
     const target = store.resolvePath(sid, payload.id, payload.path)
-    if (target === null) return { ok: false, error: '找不到节点' }
+    if (target === null) return { ok: false, error: t('找不到节点') }
     const status = payload.done === false ? 'todo' : 'done'
     const result = await hooks.completeNode(session, sid, target, status, typeof payload.note === 'string' ? payload.note : '')
     // 面板拿到回执后会立刻拉一次 state（乐观更新 + 立即刷新），所以这里不必回状态
@@ -774,7 +834,7 @@ async function dispatch(store, sid, session, payload, hooks) {
     // 且 **fresh**（丢掉旧摘要重写）——你会按这个按钮，通常就是因为这条摘要不对，
     // 而增量合并会把错的那段继续留在里面。
     const target = store.resolvePath(sid, payload.id, payload.path)
-    if (target === null) return { ok: false, error: '找不到节点' }
+    if (target === null) return { ok: false, error: t('找不到节点') }
     hooks.triggerNote(session, sid, 'manual', target, { force: true, fresh: true })
     // 人工重写摘要 = 此刻正在讨论这个节点 → 更新来源（面板上的 ↩ 跟着指到这一轮）
     await hooks.stampOrigin(session, sid, target, 'note')

@@ -1,6 +1,6 @@
 {
   "name": "dsh-learning-mode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "DSH 学习模式：一棵由 AI 维护的、可无限下钻的学习树 + 自动摘要 + 复习视图。宿主插件只挂在「学习模式」agent 预设里，普通会话零影响。",
   "type": "module",
@@ -21,7 +21,7 @@
     }
   },
   "scripts": {
-    "test": "node test/smoke.mjs && node test/mount.mjs && node test/summary.mjs && node test/client.mjs && node test/probe.mjs",
+    "test": "node test/smoke.mjs && node test/mount.mjs && node test/summary.mjs && node test/client.mjs && node test/i18n.mjs && node test/i18n-host.mjs && node test/probe.mjs",
     "install:preset": "node install.mjs",
     "install:profile": "node scripts/setup-profile.mjs",
     "link:deps": "node scripts/link-harness-deps.mjs",

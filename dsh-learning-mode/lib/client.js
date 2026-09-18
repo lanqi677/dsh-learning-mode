@@ -53,7 +53,9 @@ window.__ModuleLoader__.load({
 		// （而前端不打印原始异常，只能靠 scripts/diag-console.mjs 掏出来）。
 		// 声明后 cordis 保证 apply 运行时 slots 已就绪，直接用 ctx.slots。
 		// 官方同座位的 dsh-client-ui-jobs 就是 inject: ["slots", "locale"]。
-		var inject = ["slots"];
+		// `locale` 也是硬依赖（英文界面 / 语言切换重渲染都要它）；apply 里仍用
+		// ctx.get 取，拿不到就退化回纯中文，不会把整个按钮弄没。
+		var inject = ["slots", "locale"];
 
 		function log() {
 			var args = Array.prototype.slice.call(arguments);
@@ -62,7 +64,11 @@ window.__ModuleLoader__.load({
 		}
 
 		function rpc(sessionId, op, extra) {
-			var body = Object.assign({ sessionId: sessionId, op: op }, extra || {});
+			// 顺手把浏览器半边**真实生效的**语言带上：host 侧拿不到"浏览器决定的"语言
+			// （settings 里没显式存过时，语言是浏览器按 Accept-Language 定的），
+			// 而模型侧文案（每轮注入块 / 工具描述 / 摘要提示词）是在 host 生成的。
+			var loc = activeLocaleId();
+			var body = Object.assign({ sessionId: sessionId, op: op }, loc === undefined ? null : { locale: loc }, extra || {});
 			return fetch(RPC, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -85,6 +91,128 @@ window.__ModuleLoader__.load({
 		 * 拿不到服务时面板**不渲染 ↩ 按钮**（宁可没有，也不给一个点了没反应的假按钮）。
 		 */
 		var svc = { sessions: null, uiWorkspace: null };
+
+		// ── 文案表（中 / 英）──────────────────────────────────────────────────
+		// ⚠️ 本文件**不是 ESM**：它是 window.__ModuleLoader__.load({ factory }) 的闭包模块，
+		// 只能 require("react") 这类外部依赖，**不能** import 宿主侧的 lib/i18n.js。
+		// 所以浏览器半边自带一份只覆盖"面板 UI"的内嵌字典；两边的 key 集合基本不相交
+		// （UI 文案只由本文件用，模型侧 / 存储侧文案只由 host 用），重复的只有个别通用词。
+		//
+		// key = 中文原文（理由同 lib/i18n.js 的文件头：中文路径零风险，
+		// 且漏翻会被 test/i18n.mjs 扫 `T('…')` 的第一参数抓出来）。
+		//
+		// ⚠️ 翻译函数必须叫 **T** 而不是 t：本文件里有 `trees.map(function (t) {…})`
+		// 和 `var t = window.prompt(…)`，用 t 会被局部变量遮蔽（静默失效）。
+		var NS = "dsh-learning-mode-client";
+		var EN = {
+			// ↩ 跳回来源对话（降级链的每一句用户可见提示）
+			"这个知识点没记到来源对话": "This topic has no recorded source turn",
+			"跳不过去：拿不到会话服务（已记 rpc.log）": "Can't jump: the sessions service is unavailable (logged to rpc.log)",
+			"那次对话已经不在了（可能被删除或归档）": "That conversation is gone (deleted or archived)",
+			"没找到第 {turn} 轮的聊天行（可能已改动或还没加载）": "Couldn't find the chat row for turn {turn} (edited, or not loaded yet)",
+			"跳回那次对话": "Jump back to that conversation",
+			"跳到这一轮的对话": "Jump to this turn",
+			"（第 {turn} 轮{time}{more}）": " (turn {turn}{time}{more})",
+			" ｜ {text}": " | {text}",
+			" ｜ 共 {n} 次讨论": " | discussed {n} times",
+			"跳转失败：{message}": "Jump failed: {message}",
+
+			// 摘要：状态提示与按钮
+			"摘要生成中…": "Generating summary…",
+			"摘要没生成出来（会自动重试；也可以点 ⟳ 立刻重试）": "Summary failed (retries automatically; you can also click ⟳ to retry now)",
+			"这段内容还太少 / 没有可沉淀的结论（点 ⟳ 可强制重试）": "Not enough content / nothing to conclude (click ⟳ to force a retry)",
+			"还没有摘要（点 ⟳ 让模型总结）": "No summary yet (click ⟳ to have the model write one)",
+			"生成中…": "Generating…",
+			"摘要失败": "Summary failed",
+			"无摘要": "No summary",
+			"摘要 ▾": "Summary ▾",
+			"摘要 ▸": "Summary ▸",
+			" ｜ ": " | ",
+			"用模型重新总结这个知识点": "Rewrite this topic's summary with the model",
+			"让模型为这个知识点写摘要": "Have the model write a summary for this topic",
+
+			// 完成 / 进度
+			"取消完成": "Unmark as learned",
+			"标记学会（会写一句摘要，并回到上一层）": "Mark as learned (writes a one-line summary, then moves up one level)",
+			"已完成": "Learned",
+			"学会": "Learn",
+			"已完成 {done} / {total}": "Done {done} / {total}",
+			"这一支的进度 {done}/{total}": "Progress for this branch {done}/{total}",
+			"看这个知识点的摘要": "View this topic's summary",
+			"上次看过之后新增的知识点": "Added since you last looked",
+			"展开": "Expand",
+			"收起": "Collapse",
+
+			// 复习视图
+			"还没有已完成的知识点。": "No learned topics yet.",
+			"在树里点节点右边的「学会」，这里就会攒出可复习的摘要。": "Click \"Learn\" next to a node in the tree and reviewable summaries will collect here.",
+			"｜ 摘要待补": " | summary pending",
+			"（无摘要）": "(no summary)",
+			"{n} 个已完成": "{n} learned",
+
+			// 面板头部 / 空态 / 页脚
+			"学习树": "Learning Tree",
+			"切换 / 新建学习树": "Switch / create a learning tree",
+			"（还没有树）": "(no trees yet)",
+			"新建一棵学习树": "Create a learning tree",
+			"新建学习树的名字（例如：Java）": "Name for the new learning tree (e.g. Java)",
+			"恢复默认位置和大小": "Reset position and size",
+			"收起面板": "Collapse panel",
+			"学习树：看位置与进度": "Learning tree: position and progress",
+			"树": "Tree",
+			"复习：已完成知识点 + 摘要": "Review: learned topics and their summaries",
+			"复习": "Review",
+			"读取中…": "Loading…",
+			"还没有学习树。": "No learning tree yet.",
+			"点右上角 ＋ 新建一棵，或者直接对我说「我要学 X」。": "Click + in the top right to create one, or just tell me \"I want to learn X\".",
+			"按住这里可以拖动面板": "Drag here to move the panel",
+			"使用说明": "Usage",
+			"拖动调整面板大小": "Drag to resize the panel",
+
+			// "新增"提示（正文条 + 入口按钮）
+			"上次看过后新增 {n} 个知识点": "{n} new topic(s) since you last looked",
+			"上次看过后新增 {n} 个知识点：{titles}": "{n} new topic(s) since you last looked: {titles}",
+			"上次看过后有 {n} 个新增知识点": "{n} new topic(s) since you last looked",
+			"、": ", ",
+
+			// 会话头部入口按钮
+			"学习树（点开面板）": "Learning tree (open the panel)",
+			" ｜ 已完成 {done}/{total}": " | done {done}/{total}",
+			" ｜ 新增 {n} 个知识点": " | {n} new"
+		};
+		// zh = 对 EN 的 key 做恒等映射。**必须显式给出**：dsh-client-locale 的取值链是
+		// "当前语言 → 它声明的 fallback"，而 zh 的 fallback 就是 en ——
+		// zh 表里缺某个 key，中文界面就会显示成英文。
+		var ZH = {};
+		for (var zhKey in EN) { if (Object.prototype.hasOwnProperty.call(EN, zhKey)) ZH[zhKey] = zhKey; }
+
+		/** 可选句柄：拿到 locale 服务才可能切英文；拿不到就全程中文（行为与升级前一致）。 */
+		var localeSvc = null;
+		/**
+		 * 翻译。默认"恒等 + 插值"（返回中文 key，并把 {name} 换成实参）；
+		 * apply() 接上 locale 服务后换成 service.bind(NS)。
+		 * 组件在渲染期调用，所以这里必须是"调用时读当前值"，不能提前算好。
+		 *
+		 * ⚠️ 兜底也必须插值：只 `return key` 会把 `{done}` 这种占位符**原样漏到界面上**
+		 * （真机表现就是"已完成 {done}/{total}"）。插值规则与 dsh-client-locale 一致。
+		 */
+		var T = function (key, params) {
+			if (params === undefined || params === null) return key;
+			return String(key).replace(/\{(\w+)\}/g, function (match, name) {
+				return Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match;
+			});
+		};
+
+		/** 当前语言 id（上报给 host，让模型侧文案跟着走）。拿不到就返回 undefined。 */
+		function activeLocaleId() {
+			try {
+				if (localeSvc !== null && typeof localeSvc.getLocale === "function") {
+					var snap = localeSvc.getLocale();
+					if (snap !== null && snap !== undefined && typeof snap.active === "string") return snap.active;
+				}
+			} catch (e) { /* 语言探测失败不影响功能 */ }
+			return undefined;
+		}
 
 		/**
 		 * 把"浏览器半边看到的真实环境"写进 host 的 rpc.log。
@@ -217,12 +345,12 @@ window.__ModuleLoader__.load({
 			var turn = Math.floor(Number(src.turn));
 			var seq = Math.floor(Number(src.seq));
 			var targetSid = typeof src.sid === "string" && src.sid !== "" ? src.sid : sessionId;
-			if (!isFinite(turn) || turn < 0) { done("no-origin", "这个知识点没记到来源对话"); return; }
+			if (!isFinite(turn) || turn < 0) { done("no-origin", T("这个知识点没记到来源对话")); return; }
 
 			var switched = false;
 			if (targetSid !== sessionId) {
 				if (svc.sessions === null || svc.sessions === undefined || typeof svc.sessions.open !== "function") {
-					done("no-sessions", "跳不过去：拿不到会话服务（已记 rpc.log）");
+					done("no-sessions", T("跳不过去：拿不到会话服务（已记 rpc.log）"));
 					return;
 				}
 				try {
@@ -241,7 +369,7 @@ window.__ModuleLoader__.load({
 						say("uiWorkspace failed: " + String(e !== null && e !== undefined && e.message ? e.message : e));
 					}
 				}
-				if (!switched) { done("session-gone", "那次对话已经不在了（可能被删除或归档）"); return; }
+				if (!switched) { done("session-gone", T("那次对话已经不在了（可能被删除或归档）")); return; }
 			}
 
 			var waited = 0;
@@ -272,7 +400,7 @@ window.__ModuleLoader__.load({
 				}
 				waited += 120;
 				if (waited > 8000) {
-					done(switched ? "switched-no-row" : "no-row", switched ? null : ("没找到第 " + turn + " 轮的聊天行（可能已改动或还没加载）"));
+					done(switched ? "switched-no-row" : "no-row", switched ? null : T("没找到第 {turn} 轮的聊天行（可能已改动或还没加载）", { turn: turn }));
 					return;
 				}
 				setTimeout(attempt, 120);
@@ -652,10 +780,10 @@ window.__ModuleLoader__.load({
 			// 已完成但还没摘要时，让用户知道在发生什么（而不是一片空白）
 			if (node.note) return null;
 			if (node.status !== "done") return null;
-			if (node.noteState === "running") return "摘要生成中…";
-			if (node.noteState === "failed") return "摘要没生成出来（会自动重试；也可以点 ⟳ 立刻重试）";
-			if (node.noteState === "skipped") return "这段内容还太少 / 没有可沉淀的结论（点 ⟳ 可强制重试）";
-			return "还没有摘要（点 ⟳ 让模型总结）";
+			if (node.noteState === "running") return T("摘要生成中…");
+			if (node.noteState === "failed") return T("摘要没生成出来（会自动重试；也可以点 ⟳ 立刻重试）");
+			if (node.noteState === "skipped") return T("这段内容还太少 / 没有可沉淀的结论（点 ⟳ 可强制重试）");
+			return T("还没有摘要（点 ⟳ 让模型总结）");
 		}
 
 		/**
@@ -704,7 +832,7 @@ window.__ModuleLoader__.load({
 
 		function ProgressBar(props) {
 			var percent = props.total > 0 ? Math.round((props.done / props.total) * 100) : 0;
-			return h("div", { style: S.bar, title: "已完成 " + props.done + " / " + props.total },
+			return h("div", { style: S.bar, title: T("已完成 {done} / {total}", { done: props.done, total: props.total }) },
 				h("div", { style: Object.assign({}, S.barFill, { width: percent + "%" }) })
 			);
 		}
@@ -766,11 +894,12 @@ window.__ModuleLoader__.load({
 				key: "jump",
 				style: S.jump,
 				className: "lm-jump",
-				title: (crossSession ? "跳回那次对话" : "跳到这一轮的对话")
-					+ "（第 " + Math.floor(Number(origin.turn)) + " 轮"
-					+ (origin.time ? " ｜ " + shortTime(origin.time) : "")
-					+ (typeof node.originCount === "number" && node.originCount > 1 ? " ｜ 共 " + node.originCount + " 次讨论" : "")
-					+ "）",
+				title: (crossSession ? T("跳回那次对话") : T("跳到这一轮的对话"))
+					+ T("（第 {turn} 轮{time}{more}）", {
+						turn: Math.floor(Number(origin.turn)),
+						time: origin.time ? T(" ｜ {text}", { text: shortTime(origin.time) }) : "",
+						more: typeof node.originCount === "number" && node.originCount > 1 ? T(" ｜ 共 {n} 次讨论", { n: node.originCount }) : ""
+					}),
 				onClick: function (e) {
 					// 别把点击冒泡给行的"聚焦"处理器（act("focus") 挂在标题上，这里只是保险）
 					if (e !== null && e !== undefined && typeof e.stopPropagation === "function") e.stopPropagation();
@@ -786,7 +915,7 @@ window.__ModuleLoader__.load({
 			var caret = hasKids
 				? h("span", {
 					style: S.caret,
-					title: folded ? "展开" : "收起",
+					title: folded ? T("展开") : T("收起"),
 					onClick: function () { props.toggleFold(node.id); }
 				}, folded ? "▸" : "▾")
 				: h("span", { style: S.caret }, "");
@@ -801,26 +930,26 @@ window.__ModuleLoader__.load({
 			var badge = null;
 			if (isNew) {
 				badge = h("span", {
-					style: S.badgeNew, title: "上次看过之后新增的知识点"
+					style: S.badgeNew, title: T("上次看过之后新增的知识点")
 				}, "NEW");
 			} else if (hasKids && stat.total > 1) {
 				badge = h("span", {
-					style: S.badge, title: "这一支的进度 " + stat.done + "/" + stat.total,
+					style: S.badge, title: T("这一支的进度 {done}/{total}", { done: stat.done, total: stat.total }),
 					onClick: function () { props.toggleFold(node.id); }
 				}, stat.done + "/" + stat.total);
 			} else if (node.note) {
 				badge = h("span", {
-					style: showNote ? S.badgeOn : S.badge, className: "lm-click", title: "看这个知识点的摘要",
+					style: showNote ? S.badgeOn : S.badge, className: "lm-click", title: T("看这个知识点的摘要"),
 					onClick: function () { props.toggleNote(node.id); }
-				}, showNote ? "摘要 ▾" : "摘要 ▸");
+				}, showNote ? T("摘要 ▾") : T("摘要 ▸"));
 			} else if (noteHint(node) !== null) {
 				var hint = noteHint(node);
 				badge = h("span", {
 					style: node.noteState === "failed" ? S.badgeFail : S.badgeBusy,
 					className: node.noteState === "failed" ? "lm-click" : "",
-					title: (node.noteError || "") + (node.noteError ? " ｜ " : "") + hint,
+					title: (node.noteError || "") + (node.noteError ? T(" ｜ ") : "") + hint,
 					onClick: node.noteState === "failed" ? function () { act("note", { force: true }); } : undefined
-				}, node.noteState === "running" ? "生成中…" : (node.noteState === "failed" ? "摘要失败" : "无摘要"));
+				}, node.noteState === "running" ? T("生成中…") : (node.noteState === "failed" ? T("摘要失败") : T("无摘要")));
 			}
 
 			var kids = [];
@@ -864,14 +993,14 @@ window.__ModuleLoader__.load({
 					h("button", {
 						style: Object.assign({}, S.btn, { border: "1px solid transparent", padding: "0 4px" }),
 						className: "lm-act",
-						title: node.note ? "用模型重新总结这个知识点" : "让模型为这个知识点写摘要",
+						title: node.note ? T("用模型重新总结这个知识点") : T("让模型为这个知识点写摘要"),
 						onClick: function () { act("note", { force: true }); }
 					}, "⟳"),
 					h("button", {
 						style: node.status === "done" ? S.btnDone : S.btn,
-						title: node.status === "done" ? "取消完成" : "标记学会（会写一句摘要，并回到上一层）",
+						title: node.status === "done" ? T("取消完成") : T("标记学会（会写一句摘要，并回到上一层）"),
 						onClick: function () { act("done", { done: node.status !== "done" }); }
-					}, node.status === "done" ? "已完成" : "学会")
+					}, node.status === "done" ? T("已完成") : T("学会"))
 				),
 				showNote && node.note ? h(NoteBlock, { text: node.note, depth: depth }) : null,
 				hintLine,
@@ -885,9 +1014,9 @@ window.__ModuleLoader__.load({
 			var stats = (data && data.stats) || { done: 0, total: 0, withNote: 0 };
 			if (items.length === 0) {
 				return h("div", { style: S.empty },
-					"还没有已完成的知识点。",
+					T("还没有已完成的知识点。"),
 					h("br"),
-					"在树里点节点右边的「学会」，这里就会攒出可复习的摘要。");
+					T("在树里点节点右边的「学会」，这里就会攒出可复习的摘要。"));
 			}
 			return h("div", { style: S.revWrap },
 				items.map(function (item, index) {
@@ -909,9 +1038,9 @@ window.__ModuleLoader__.load({
 						h("div", { style: S.revMeta },
 							h("span", { style: S.revPath, title: item.path }, where),
 							h("span", null, when),
-							missing ? h("span", { style: { color: V.dim } }, "｜ 摘要待补") : null
+							missing ? h("span", { style: { color: V.dim } }, T("｜ 摘要待补")) : null
 						),
-						h("div", { style: S.revNote }, item.note || "（无摘要）")
+						h("div", { style: S.revNote }, item.note || T("（无摘要）"))
 					);
 				})
 			);
@@ -941,62 +1070,64 @@ window.__ModuleLoader__.load({
 			var head = [
 				h("div", { key: "r1", style: S.headRow },
 					h("span", { style: S.brandDot }),
-					h("span", { style: S.brandText }, "学习树"),
+					h("span", { style: S.brandText }, T("学习树")),
 					h("select", {
 						key: "sel", style: S.select, className: "lm-sel", value: tree ? tree.id : "",
-						title: "切换 / 新建学习树",
+						title: T("切换 / 新建学习树"),
 						onChange: function (e) { act("open", { treeId: e.target.value }); }
-					}, (trees.length === 0 ? [{ id: "", title: "（还没有树）", done: 0, total: 0 }] : trees).map(function (t) {
+					}, (trees.length === 0 ? [{ id: "", title: T("（还没有树）"), done: 0, total: 0 }] : trees).map(function (t) {
 						return h("option", { key: t.id, value: t.id }, t.title + "  " + t.done + "/" + t.total);
 					})),
 					h("button", {
-						key: "new", style: S.iconBtn, title: "新建一棵学习树",
+						key: "new", style: S.iconBtn, title: T("新建一棵学习树"),
 						onClick: function () {
-							var t = window.prompt("新建学习树的名字（例如：Java）", "");
+							var t = window.prompt(T("新建学习树的名字（例如：Java）"), "");
 							if (t !== null && t.trim() !== "") act("create", { title: t.trim() });
 						}
 					}, "＋"),
 					// ⟲ 只在"用户真动过窗口"时出现（否则头部白多一个按钮）
 					hasGeom(geom) && win !== null && win !== undefined && typeof win.reset === "function"
-						? h("button", { key: "resetwin", style: S.iconBtn, title: "恢复默认位置和大小", onClick: function () { win.reset(); } }, "⟲")
+						? h("button", { key: "resetwin", style: S.iconBtn, title: T("恢复默认位置和大小"), onClick: function () { win.reset(); } }, "⟲")
 						: null,
-					h("button", { key: "fold", style: S.iconBtn, title: "收起面板", onClick: function () { closePanel(); } }, "✕")
+					h("button", { key: "fold", style: S.iconBtn, title: T("收起面板"), onClick: function () { closePanel(); } }, "✕")
 				),
 				h("div", { key: "r2", style: S.headRow },
 					h("div", { style: S.tabs },
 						h("button", {
-							key: "tabTree", style: view === "tree" ? S.tabOn : S.tab, title: "学习树：看位置与进度",
+							key: "tabTree", style: view === "tree" ? S.tabOn : S.tab, title: T("学习树：看位置与进度"),
 							onClick: function () { setView("tree"); }
-						}, "树"),
+						}, T("树")),
 						h("button", {
-							key: "tabReview", style: view === "review" ? S.tabOn : S.tab, title: "复习：已完成知识点 + 摘要",
+							key: "tabReview", style: view === "review" ? S.tabOn : S.tab, title: T("复习：已完成知识点 + 摘要"),
 							onClick: function () { setView("review"); reloadReview(); }
-						}, "复习")
+						}, T("复习"))
 					),
 					h("span", { style: S.spacer }),
 					view === "tree" ? h(ProgressBar, { key: "bar", done: stat.done, total: stat.total }) : null,
 					h("span", { key: "num", style: S.progressText },
 						view === "tree"
 							? stat.done + "/" + stat.total
-							: ((review && review.stats ? review.stats.done : 0) + " 个已完成"))
+							: T("{n} 个已完成", { n: review && review.stats ? review.stats.done : 0 }))
 				)
 			];
 			var body;
 			if (view === "review") {
 				body = review === null
-					? h("div", { style: S.empty }, "读取中…")
+					? h("div", { style: S.empty }, T("读取中…"))
 					: reviewBody(review, act, newMarks);
 			} else if (tree === null || tree === undefined) {
 				body = h("div", { style: S.empty },
-					"还没有学习树。",
+					T("还没有学习树。"),
 					h("br"),
-					"点右上角 ＋ 新建一棵，或者直接对我说「我要学 X」。");
+					T("点右上角 ＋ 新建一棵，或者直接对我说「我要学 X」。"));
 			} else {
 				body = h("div", null,
 					newCount > 0
-						? h("div", { style: S.newBar, title: newTitles.join("、") },
+						? h("div", { style: S.newBar, title: newTitles.join(T("、")) },
 							h("span", { style: S.brandDot }),
-							"上次看过后新增 " + newCount + " 个知识点" + (newTitles.length > 0 ? "：" + newTitles.join("、") + (newCount > newTitles.length ? "…" : "") : ""))
+							newTitles.length > 0
+								? T("上次看过后新增 {n} 个知识点：{titles}", { n: newCount, titles: newTitles.join(T("、")) + (newCount > newTitles.length ? "…" : "") })
+								: T("上次看过后新增 {n} 个知识点", { n: newCount }))
 						: null,
 					(tree.nodes || []).map(function (node) {
 						return h(TreeRow, {
@@ -1014,7 +1145,7 @@ window.__ModuleLoader__.load({
 				h("div", {
 					style: S.head,
 					className: "lm-head",
-					title: "按住这里可以拖动面板",
+					title: T("按住这里可以拖动面板"),
 					// 拖头部移动窗口；按在按钮/下拉框上时不算拖动
 					onMouseDown: function (e) {
 						if (drag === null || isInteractiveTarget(e === null || e === undefined ? null : e.target)) return;
@@ -1028,13 +1159,13 @@ window.__ModuleLoader__.load({
 					h("span", {
 						style: { cursor: "pointer", textDecoration: "underline dotted" },
 						onClick: function () { setOpen(open === "usage" ? null : "usage"); }
-					}, "使用说明 " + (open === "usage" ? "▾" : "▸")),
+					}, T("使用说明") + " " + (open === "usage" ? "▾" : "▸")),
 					open === "usage" ? h("div", { style: { marginTop: "6px", whiteSpace: "pre-wrap" } }, data.usage || "") : null
 				),
 				// 三个缩放手柄：右边缘（只改宽）/ 下边缘（只改高）/ 右下角（改宽高）
 				drag === null ? null : h("div", { key: "rs-r", className: "lm-rs lm-rs-r", onMouseDown: function (e) { drag("size-w", e); } }),
 				drag === null ? null : h("div", { key: "rs-b", className: "lm-rs lm-rs-b", onMouseDown: function (e) { drag("size-h", e); } }),
-				drag === null ? null : h("div", { key: "rs-c", className: "lm-rs lm-rs-c", title: "拖动调整面板大小", onMouseDown: function (e) { drag("size", e); } })
+				drag === null ? null : h("div", { key: "rs-c", className: "lm-rs lm-rs-c", title: T("拖动调整面板大小"), onMouseDown: function (e) { drag("size", e); } })
 			);
 		}
 
@@ -1173,7 +1304,7 @@ window.__ModuleLoader__.load({
 				try {
 					jumpToOrigin(sessionId, origin, function (msg) { setNotice(msg); });
 				} catch (e) {
-					setNotice("跳转失败：" + String(e !== null && e !== undefined && e.message ? e.message : e));
+					setNotice(T("跳转失败：{message}", { message: String(e !== null && e !== undefined && e.message ? e.message : e) }));
 				}
 			};
 
@@ -1262,16 +1393,16 @@ window.__ModuleLoader__.load({
 				type: "button",   // 跟邻居一致：显式声明，避免任何隐式提交语义
 				className: "lm-chip",
 				style: S.chip,
-				title: "学习树（点开面板）"
-					+ (stat.total > 0 ? " ｜ 已完成 " + stat.done + "/" + stat.total : "")
-					+ (chipNew > 0 ? " ｜ 新增 " + chipNew + " 个知识点" : ""),
+				title: T("学习树（点开面板）")
+					+ (stat.total > 0 ? T(" ｜ 已完成 {done}/{total}", { done: stat.done, total: stat.total }) : "")
+					+ (chipNew > 0 ? T(" ｜ 新增 {n} 个知识点", { n: chipNew }) : ""),
 				onClick: function () { if (open === null) openPanel(); else closePanel(); }
 			},
 				h("span", { key: "ico", className: "lm-chip-icon" }, h(TreeGlyph)),
-				h("span", { key: "txt" }, "学习树"),
+				h("span", { key: "txt" }, T("学习树")),
 				stat.total > 0 ? h("span", { key: "num", className: "lm-chip-num" }, stat.done + "/" + stat.total) : null,
 				chipNew > 0
-					? h("span", { key: "dot", className: "lm-chip-new", title: "上次看过后有 " + chipNew + " 个新增知识点" },
+					? h("span", { key: "dot", className: "lm-chip-new", title: T("上次看过后有 {n} 个新增知识点", { n: chipNew }) },
 						h("span", { className: "lm-chip-newdot" }), "+" + chipNew)
 					: null
 			);
@@ -1296,11 +1427,18 @@ window.__ModuleLoader__.load({
 
 		function registerInto(slots) {
 			slots.inject("conversation.session.header.actions", function () {
-				var dispose = slots.register({
+				// 声明 locale 命名空间有两个作用（见 dsh-client-ui-renderer）：
+				//   ① 组合时给组件注入 `t` 座位；② `useLocaleRevision` 让**语言切换时
+				//      这个 outlet 自动重渲染** —— 不用自己订阅 locale/change + setState。
+				// ⚠️ 只有 locale 服务确实存在时才声明：renderer 在"声明了 locale 但没有
+				// locale face"时会**直接抛 SlotAssemblyError**，那会把整个按钮弄没。
+				var reg = {
 					name: "conversation.session.header.actions",
 					id: "learning-mode",
 					order: 20
-				}, Chip);
+				};
+				if (localeSvc !== null) reg.locale = NS;
+				var dispose = slots.register(reg, Chip);
 				log("registered into conversation.session.header.actions");
 				return dispose;
 			});
@@ -1311,10 +1449,40 @@ window.__ModuleLoader__.load({
 		}
 
 		function apply(ctx) {
-			// inject: ["slots"] 已保证此处 slots 就绪；不再用 ctx.get("slots")
+			// inject: ["slots", "locale"] 已保证此处 slots 就绪；不再用 ctx.get("slots")
 			// （未声明的服务 cordis 会抛错，而不是返回 undefined）。
 			var slots = ctx.slots;
 			log("apply() called; slots =", slots === undefined || slots === null ? "MISSING" : "ok");
+			// 语言：先接上 locale 服务，才可能出英文界面。
+			// 用 ctx.get（可选依赖入口）而不是 ctx.locale：拿不到只退化回纯中文；
+			// 属性访问在服务缺席时会抛，那会让整个插件挂不上。
+			try {
+				if (typeof ctx.get === "function") localeSvc = ctx.get("locale") || null;
+			} catch (e) { localeSvc = null; }
+			if (localeSvc !== null && typeof ctx.effect === "function") {
+				// 字典注册属于本 fiber 的副作用：随 effect 的 disposer 一起摘掉，
+				// 这样重载/卸载后重新 apply 不会撞 "已经有这个 (ns, locale)" 的重复注册。
+				ctx.effect(function () {
+					var disposers = [];
+					try {
+						disposers.push(localeSvc.register(NS, "zh", ZH));
+						disposers.push(localeSvc.register(NS, "en", EN));
+					} catch (e) {
+						log("dictionary registration failed:", String(e !== null && e !== undefined && e.message ? e.message : e));
+					}
+					return function () {
+						for (var i = 0; i < disposers.length; i += 1) {
+							try { disposers[i](); } catch (e2) { /* disposer 是幂等的 */ }
+						}
+					};
+				});
+			}
+			if (localeSvc !== null && typeof localeSvc.bind === "function") {
+				try { T = localeSvc.bind(NS); } catch (e) {
+					log("locale bind failed:", String(e !== null && e !== undefined && e.message ? e.message : e));
+				}
+			}
+			log("locale:", localeSvc === null ? "absent (中文)" : "active=" + String(activeLocaleId()));
 			// 客户端服务用**可选访问**拿：拿不到只是"没有 ↩ 跳转"，绝不影响学习树本体。
 			// （ctx.get 是框架给可选依赖的入口；未声明服务的**属性访问**才会抛。）
 			try {

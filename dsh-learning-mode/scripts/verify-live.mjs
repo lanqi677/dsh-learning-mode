@@ -114,14 +114,25 @@ if (lastFocus !== null) console.log('  学习模式绑定：' + lastFocus.treeId
 console.log('\n真机核查（判据都在日志里，不看代码推断）：')
 
 // ① 每轮注入：运行时上下文快照里应当有【进度】/▶ 当前聚焦
+// ⚠️ 判据同时认**中英文**：插件文案跟随 DSH 的语言（见 lib/i18n.js），
+// 英文会话里注入块整个是英文的。只认中文会让英文环境下核查结果假阴性。
+const FOCUS_MARKS = ['▶ 当前聚焦', '▶ Current focus']
+const PROGRESS_MARKS = ['【进度】', '[Progress]']
+const TREE_HEAD_MARKS = ['学习树：', 'Learning tree:']
+const PENDING_LEVEL_MARKS = ['这一层还没学完', 'Not finished at this level']
+// 大小写不敏感：诊断脚本不该因为译文把 "current focus" 写成 "Current focus" 就失灵。
+const anyMark = (body, marks) => marks.some((mark) => String(body).toLowerCase().includes(mark.toLowerCase()))
+
 const injectedBlocks = snapshotMessages.filter((event) => {
   const body = JSON.stringify(event.data)
-  return body.includes('▶ 当前聚焦') || body.includes('【进度】')
+  return anyMark(body, FOCUS_MARKS) || anyMark(body, PROGRESS_MARKS)
 })
-line(injectedBlocks.length > 0, '每轮注入生效（快照里出现 ▶ 当前聚焦 / 【进度】）', injectedBlocks.length + ' 次')
-const fullBlocks = snapshotMessages.filter((event) => JSON.stringify(event.data).includes('学习树：'))
-line(fullBlocks.length > 0, '注入块是完整的学习模式状态块（含"学习树："表头）', fullBlocks.length + ' 次')
-console.log('     （"这一层还没学完"出现 ' + count(text, '这一层还没学完') + ' 次；当前聚焦节点若没有未完成的子节点，这一行本就不该出现）')
+line(injectedBlocks.length > 0, '每轮注入生效（快照里出现 ▶ 当前聚焦 / 【进度】，中英文均认）', injectedBlocks.length + ' 次')
+const fullBlocks = snapshotMessages.filter((event) => anyMark(JSON.stringify(event.data), TREE_HEAD_MARKS))
+line(fullBlocks.length > 0, '注入块是完整的学习模式状态块（含"学习树："表头，中英文均认）', fullBlocks.length + ' 次')
+console.log('     （"这一层还没学完" / "Not finished at this level" 出现 '
+  + (count(text, PENDING_LEVEL_MARKS[0]) + count(text, PENDING_LEVEL_MARKS[1]))
+  + ' 次；当前聚焦节点若没有未完成的子节点，这一行本就不该出现）')
 
 // ② 学习会话不该有 super-injector 的开发向引导（mutePresets 生效）
 const injectorGuide = count(text, '本环境装有 dsh-super-injector')

@@ -19,6 +19,8 @@
  * 改为首次真正要生成摘要时动态 import，拿不到就用内置的最小实现兜底。
  */
 
+import { t } from './i18n.js'
+
 /** 摘要请求的 plugin 标识（写进 Message.source，也用于日志）。 */
 export const NOTE_PLUGIN_ID = 'dsh-learning-mode'
 
@@ -38,17 +40,20 @@ export const MAX_OUTPUT_TOKENS = 1200
 /** 摘要这种小任务不要开推理：默认 high 会把 token 预算烧光（真机实测）。 */
 export const SUMMARY_REASONING_EFFORT = 'off'
 
-const SYSTEM_PROMPT = [
-  '你在为一个「学习树」写知识点的复习摘要。用户刚学完**一个**知识点，你要留下以后能直接看懂的一段话。',
-  '',
-  '要求：',
-  '- **只写属于「本次要总结的知识点」的内容**。原料是一段连续对话，里面很可能同时讲了同层的好几个知识点（甚至是整篇论文的全景概览）；那些不属于本次目标，一个字都不要写进来。',
-  '- 写 2-4 句中文，只写：核心结论、关键机制、易错点、还没解决的问题。',
-  '- 不要复述对话过程，不要出现"用户问""我回答"这类叙述，不要客套，不要 markdown 标题或列表符号。',
-  '- 已有摘要时，是**增量合并**：保留仍然正确的旧结论，补上这次新增/修正的内容，不要丢掉信息。',
-  '- 如果原料里关于**这一个**知识点的内容不足以沉淀结论（只是顺带提了一句、或者讲的其实是别的知识点），只回复两个字：无内容',
-  '- 直接输出摘要正文，不要任何前缀。',
-].join('\n')
+/**
+ * 摘要的系统提示词。
+ * ⚠️ 写成函数而不是模块级常量：语言由 index.js 在 apply() 之后才设定，模块加载期
+ * 求值会把文案固化成当时的语言（i18n.js 的约定是"新发起的调用立刻生效"）。
+ */
+const SYSTEM_PROMPT = () => t(`你在为一个「学习树」写知识点的复习摘要。用户刚学完**一个**知识点，你要留下以后能直接看懂的一段话。
+
+要求：
+- **只写属于「本次要总结的知识点」的内容**。原料是一段连续对话，里面很可能同时讲了同层的好几个知识点（甚至是整篇论文的全景概览）；那些不属于本次目标，一个字都不要写进来。
+- 写 2-4 句中文，只写：核心结论、关键机制、易错点、还没解决的问题。
+- 不要复述对话过程，不要出现"用户问""我回答"这类叙述，不要客套，不要 markdown 标题或列表符号。
+- 已有摘要时，是**增量合并**：保留仍然正确的旧结论，补上这次新增/修正的内容，不要丢掉信息。
+- 如果原料里关于**这一个**知识点的内容不足以沉淀结论（只是顺带提了一句、或者讲的其实是别的知识点），只回复两个字：无内容
+- 直接输出摘要正文，不要任何前缀。`)
 
 /**
  * 从会话里抽出"聚焦窗口内"的真人对话文本。
@@ -93,7 +98,7 @@ export function extractTranscript(session, sinceMs) {
     out.chars += text.length
     if (out.from === 0) out.from = time
     out.to = Math.max(out.to, time)
-    out.lines.push((role === 'user' ? '【我】' : '【AI】') + text)
+    out.lines.push((role === 'user' ? t('【我】') : t('【AI】')) + text)
     out.items.push({ role, text, time })
   }
   return out
@@ -136,9 +141,9 @@ export function normalizeHeading(text) {
 
 function headingMatches(headingText, title) {
   const h = normalizeHeading(headingText)
-  const t = normalizeHeading(title)
-  if (h === '' || t === '') return false
-  return h === t || h.includes(t) || t.includes(h)
+  const heading = normalizeHeading(title)
+  if (h === '' || heading === '') return false
+  return h === heading || h.includes(heading) || heading.includes(h)
 }
 
 /** 一行是不是一个小节的开头？返回 {level, text, style}；不是则 null。 */
@@ -260,19 +265,18 @@ export function summarizePrompt(options) {
     ? options.title.trim()
     : titleFromPath(options.path)
   const siblings = (Array.isArray(options.siblings) ? options.siblings : [])
-    .filter((t) => typeof t === 'string' && t.trim() !== '' && t.trim() !== title)
+    .filter((item) => typeof item === 'string' && item.trim() !== '' && item.trim() !== title)
     .slice(0, 10)
   const lines = [
-    '本次要总结的知识点：' + title,
-    '它在学习树里的位置：' + options.path,
+    t('本次要总结的知识点：{title}', { title }),
+    t('它在学习树里的位置：{path}', { path: options.path }),
   ]
   if (siblings.length > 0) {
-    lines.push('同层其它知识点（**不属于**本次总结；原料里讲到它们时请跳过）：' + siblings.join(' / '))
+    lines.push(t('同层其它知识点（**不属于**本次总结；原料里讲到它们时请跳过）：{siblings}', { siblings: siblings.join(' / ') }))
   }
-  lines.push('已有摘要：' + (options.existingNote === '' || options.existingNote === undefined ? '（无）' : options.existingNote))
+  lines.push(t('已有摘要：{note}', { note: options.existingNote === '' || options.existingNote === undefined ? t('（无）') : options.existingNote }))
   lines.push('')
-  lines.push('下面是这段时间的对话。**只**挑与「' + title + '」直接相关的内容来写；'
-    + '这段对话很可能同时讲了上面列出的其它知识点甚至整篇论文，那些一个字都不要写进来。')
+  lines.push(t('下面是这段时间的对话。**只**挑与「{title}」直接相关的内容来写；这段对话很可能同时讲了上面列出的其它知识点甚至整篇论文，那些一个字都不要写进来。', { title }))
   for (const line of options.transcript) lines.push(line)
   return lines.join('\n')
 }
@@ -349,19 +353,19 @@ export class SummaryPipeline {
       if (!meetsThreshold(transcript)) {
         // 内容不够：不算失败（不累计 tried），下次内容够了再补。
         this.stats.skipped += 1
-        await this.markSkipped(request, '内容太少（' + transcript.messages + ' 条 / ' + transcript.chars + ' 字）')
+        await this.markSkipped(request, t('内容太少（{messages} 条 / {chars} 字）', { messages: transcript.messages, chars: transcript.chars }))
         return { ok: false, error: 'too-little', messages: transcript.messages, chars: transcript.chars }
       }
       const route = resolveRoute(session, this.getDefaultModel())
       if (route === null) {
         this.stats.skipped += 1
-        await this.markSkipped(request, '没有可用的模型路由')
+        await this.markSkipped(request, t('没有可用的模型路由'))
         return { ok: false, error: 'no-route' }
       }
       // 原料收窄：只留"标题命中该知识点"的小节（AI 一口气讲 6 个概念时的关键一步）。
       const narrowed = narrowTranscript(transcript.items, request.title)
       const lines = narrowed.narrowed
-        ? narrowed.items.map((item) => (item.role === 'user' ? '【我】' : '【AI】') + item.text)
+        ? narrowed.items.map((item) => (item.role === 'user' ? t('【我】') : t('【AI】')) + item.text)
         : transcript.lines
       if (narrowed.narrowed) {
         this.log('note 原料收窄：' + transcript.chars + ' → ' + narrowed.chars + ' 字（命中标题小节，path=' + request.path + '）')
@@ -375,7 +379,7 @@ export class SummaryPipeline {
       })
       if (note === '') {
         this.stats.skipped += 1
-        await this.markSkipped(request, '模型认为没有可沉淀的结论')
+        await this.markSkipped(request, t('模型认为没有可沉淀的结论'))
         return { ok: false, error: 'empty' }
       }
       const written = await this.store.setNote(request.sessionId, request.path, note, {
@@ -433,7 +437,7 @@ export class SummaryPipeline {
       provider: route.provider,
       model: route.model,
       messages,
-      system: SYSTEM_PROMPT,
+      system: SYSTEM_PROMPT(),
       maxTokens: MAX_OUTPUT_TOKENS,
     }
     const timeout = makeTimeoutSignal(TIMEOUT_MS)
@@ -449,13 +453,15 @@ export class SummaryPipeline {
     let text = attempt.text
     if (attempt.finish !== null && attempt.finish.kind === 'max-tokens') {
       // 截断但有内容 → 有总比没有好；一个字都没有 → 明确报"预算被吃光"。
-      if (text.trim() === '') throw new Error('输出 token 用尽且没有产出文本（模型把预算花在别处了）')
+      if (text.trim() === '') throw new Error(t('输出 token 用尽且没有产出文本（模型把预算花在别处了）'))
       this.log('摘要被 max-tokens 截断，按已产出的部分落盘')
     }
     text = text.trim()
-    if (text === '无内容') return ''
-    // 模型偶尔会加引号或"摘要："前缀，这里只做最基本的清理。
-    return text.replace(/^摘要[:：]\s*/, '').replace(/^["“](.*)["”]$/s, '$1').trim()
+    if (text === '无内容' || text === 'NO_CONTENT') return ''
+    // 模型偶尔会加引号或"摘要："/"Summary:" 前缀，这里只做最基本的清理。
+    // ⚠️ 中英两套提示词各对应一个前缀词，两个都要清 —— 否则英文会话会把
+    // "Summary: …" 这个前缀一起存进摘要（真机表现是摘要开头多一句废话）。
+    return text.replace(/^(?:摘要|Summary)[:：]\s*/i, '').replace(/^["“](.*)["”]$/s, '$1').trim()
   }
 
   /** 一次流式装配；异常与 error/aborted 结束都收敛成 { error }，不往外抛。 */
@@ -483,7 +489,7 @@ export class SummaryPipeline {
       return { text, finish, error }
     }
     if (finish !== null && finish.kind === 'tool-calls') {
-      return { text, finish, error: new Error('模型意外请求了工具调用') }
+      return { text, finish, error: new Error(t('模型意外请求了工具调用')) }
     }
     return { text, finish, error: null }
   }

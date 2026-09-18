@@ -177,7 +177,9 @@ const def = captured['dsh-learning-mode']
 check('客户端模块已把自身注册进 __ModuleLoader__', def !== undefined && typeof def.factory === 'function')
 const plugin = def.factory(requireShim)
 check('插件导出 name/inject/apply', typeof plugin.name === 'string' && typeof plugin.apply === 'function')
-check('声明了 inject: ["slots"]（不声明会在 apply 第一行抛）', Array.isArray(plugin.inject) && plugin.inject.includes('slots'))
+check('声明了 inject: ["slots", "locale"]（不声明会在 apply 第一行抛）',
+  Array.isArray(plugin.inject) && plugin.inject.includes('slots') && plugin.inject.includes('locale'),
+  plugin.inject)
 
 // ── 走一遍 apply()，确认注册座位 ────────────────────────────────────────
 const registrations = []
@@ -190,6 +192,10 @@ plugin.apply({ slots, get: (name) => (name === 'sessions' ? fakeSessions : undef
 check('apply() 不抛错且调用了 slots.inject', injected.includes('conversation.session.header.actions'), injected)
 check('注册进 conversation.session.header.actions', registrations.length === 1 && registrations[0].options.name === 'conversation.session.header.actions')
 check('注册 id 是 learning-mode', registrations[0].options.id === 'learning-mode')
+// ⚠️ 没有 locale 服务时**不能**声明 entry.locale：renderer 在"声明了 locale 但没有 locale face"
+// 时会直接抛 SlotAssemblyError，那会把整个「学习树」按钮弄没。宁可退回纯中文。
+check('没有 locale 服务时：注册项不带 locale（不能触发 SlotAssemblyError）',
+  registrations[0].options.locale === undefined, registrations[0].options)
 
 // ── 拍平元素树成文本 ────────────────────────────────────────────────────
 function textOf(node) {
@@ -760,6 +766,89 @@ check('⟲ 恢复默认：状态回到空几何（下次渲染即贴右自适应
   stateWrites.length === 1 && Object.keys(stateWrites[0]).length === 0, stateWrites[0])
 check('恢复默认后 ⟲ 自己消失（只在该出现的时候出现）',
   findByTitle(renderPanel(STATE), GEOM_TITLE_RESET) === null)
+
+// ══ i18n：面板文案跟随 DSH 的语言（zh / en），且**切语言后立刻取到新值** ══════
+// 假 locale 服务复刻 dsh-client-locale 的取值规则：
+//   链 = 当前语言 → 它声明的 fallback（zh 的 fallback 就是 en）→ 都没有就返回 key。
+// active 做成**可变**的：用来验证"同一个 T 在切语言之后取到新语言的值"
+// （真机上靠 renderer 的 useLocaleRevision 触发重渲染，这里直接再渲染一次）。
+function fakeLocale(initial) {
+  let active = initial
+  const dicts = new Map()
+  const registered = []
+  const chain = () => (active === 'zh' ? ['zh', 'en'] : ['en'])
+  const lookup = (ns, key) => {
+    for (const loc of chain()) {
+      const dict = dicts.get(ns + '|' + loc)
+      if (dict !== undefined && typeof dict[key] === 'string') return dict[key]
+    }
+    return undefined
+  }
+  return {
+    register(ns, locale, dict) {
+      registered.push({ ns, locale })
+      dicts.set(ns + '|' + locale, dict)
+      return () => {}
+    },
+    bind(ns) {
+      return (key, params) => {
+        const found = lookup(ns, key)
+        const template = found === undefined ? key : found
+        if (params === undefined || params === null) return template
+        return template.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match))
+      }
+    },
+    getLocale() { return { active, locales: [{ id: active }], revision: 1 } },
+    subscribe() { return () => {} },
+    setActive(id) { active = id },
+    registered,
+  }
+}
+
+const locale = fakeLocale('zh')
+plugin.apply({
+  slots,
+  get: (name) => (name === 'locale' ? locale : (name === 'sessions' ? fakeSessions : undefined)),
+  effect: (fn) => fn(),
+})
+const i18nReg = registrations[registrations.length - 1].options
+check('接上 locale 服务后：注册项带 locale 命名空间（renderer 据此注入 t 座位 + 切语言重渲染）',
+  i18nReg.locale === 'dsh-learning-mode-client', i18nReg)
+check('注册了 zh 与 en 两本字典',
+  locale.registered.length === 2
+    && locale.registered.some((r) => r.locale === 'zh')
+    && locale.registered.some((r) => r.locale === 'en'),
+  locale.registered)
+
+// zh 基线
+hookQueue = [STATE_WITH_NEW, '', 'panel', 'tree', null, {}, { n1: true }, '2026-09-17T00:00:00.000Z']
+const zhPanel = textOf(Chip({ sessionId: 's1' }))
+check('中文：面板标题「学习树」', zhPanel.includes('学习树'), zhPanel.slice(0, 200))
+check('中文：完成按钮是「学会」', zhPanel.includes('学会'), zhPanel.slice(0, 200))
+
+// 切到 en：同一个 T 必须取到英文
+locale.setActive('en')
+hookQueue = [STATE_WITH_NEW, '', 'panel', 'tree', null, {}, { n1: true }, '2026-09-17T00:00:00.000Z']
+const enPanel = textOf(Chip({ sessionId: 's1' }))
+check('英文：面板标题 Learning Tree', enPanel.includes('Learning Tree'), enPanel.slice(0, 200))
+check('英文：两个页签是 Tree / Review', enPanel.includes('Tree') && enPanel.includes('Review'), enPanel.slice(0, 200))
+check('英文：完成按钮是 Learn（不是「学会」）', enPanel.includes('Learn') && !enPanel.includes('学会'), enPanel.slice(0, 200))
+check('英文："新增"提示是英文整句',
+  enPanel.includes('new topic(s) since you last looked'), enPanel.slice(0, 300))
+check('英文：界面文案里不再漏出中文（漏翻会在这里露出来）',
+  !enPanel.includes('学习树') && !enPanel.includes('复习') && !enPanel.includes('收起面板'),
+  enPanel.slice(0, 300))
+
+// 收起状态（会话头部入口按钮）也要跟着语言走
+hookQueue = [STATE_WITH_NEW, '', null, 'tree', null]
+const enChip = textOf(Chip({ sessionId: 's1' }))
+check('英文：入口按钮 Learning Tree', enChip.includes('Learning Tree'), enChip.slice(0, 200))
+
+// 再切回中文：同一个 T 又要回到中文（证明是"调用时取值"而不是绑定时快照）
+locale.setActive('zh')
+hookQueue = [STATE_WITH_NEW, '', null, 'tree', null]
+const backChip = textOf(Chip({ sessionId: 's1' }))
+check('切回中文：入口按钮回到「学习树」', backChip.includes('学习树') && !backChip.includes('Learning Tree'), backChip.slice(0, 200))
 
 console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURES')
 process.exit(failures === 0 ? 0 : 1)

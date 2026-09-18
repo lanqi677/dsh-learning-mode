@@ -171,6 +171,28 @@ node = findNode(tree, 'Java/语法')
 check('模型答"无内容" → 不写摘要', empty.ok === false && empty.error === 'empty' && node.note === '', { empty, note: node.note })
 check('模型答"无内容" → 状态标 skipped', node.noteState === 'skipped', node.noteState)
 
+// ── i18n：英文会话用的是英文提示词，哨兵词与"摘要："前缀词都跟着变 ─────────
+// 英文提示词让模型回 NO_CONTENT（见 lib/i18n.js 的英文摘要提示词），
+// 只认中文"无内容"的话，英文会话会把字面量 "NO_CONTENT" 当成摘要存下来。
+llm = fakeLlm('NO_CONTENT')
+pipeline = new SummaryPipeline({ store, getLlm: () => llm, getDefaultModel: () => ({ currentSelection: () => ({ provider: 'fake', model: 'fake-1' }) }) })
+await store.addNodes(sid, 'Java', ['语法英文'])
+const emptyEn = await pipeline.run({ ...req, path: 'Java/语法英文', session: fakeSession(richEvents) })
+tree = store.readTree('tutorial')
+node = findNode(tree, 'Java/语法英文')
+check('英文会话：模型答 NO_CONTENT → 同样不写摘要（哨兵中英都认）',
+  emptyEn.ok === false && emptyEn.error === 'empty' && node.note === '', { emptyEn, note: node.note })
+
+// 英文会话下模型可能回 "Summary: …"，这个前缀也必须清掉（否则摘要开头多一句废话）
+llm = fakeLlm('Summary: 继承是 is-a 关系')
+pipeline = new SummaryPipeline({ store, getLlm: () => llm, getDefaultModel: () => ({ currentSelection: () => ({ provider: 'fake', model: 'fake-1' }) }) })
+await store.addNodes(sid, 'Java', ['前缀英文'])
+await pipeline.run({ ...req, path: 'Java/前缀英文', session: fakeSession(richEvents) })
+tree = store.readTree('tutorial')
+node = findNode(tree, 'Java/前缀英文')
+check('英文会话：Summary: 前缀被清掉（中文的"摘要："同样仍被清）',
+  node.note === '继承是 is-a 关系', node.note)
+
 // ── 真机踩过的坑①：max-tokens 截断 ──────────────────────────────────────
 // 有部分文本 → 收下；一个字都没有 → 明确报错（而不是写一条空摘要）
 await store.addNodes(sid, 'Java', ['内存'])

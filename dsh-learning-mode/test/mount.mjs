@@ -154,6 +154,19 @@ check('outline_focus 成功', JSON.parse(res).ok === true, res)
 res = await byName.outline_focus.execute({ node: '不存在/的节点' }, exec)
 check('outline_focus 对不存在的节点报错', JSON.parse(res).ok === false, res)
 
+// 回到整棵树的哨兵值：中文界面用"根"（工具参数说明就是这么写的），
+// 英文界面用 "root"（英文参数说明承诺的是它）。两个都必须真的认，
+// 否则英文会话里模型照着说明传值会失败。
+res = await byName.outline_focus.execute({ node: 'Java/对象' }, exec)
+res = await byName.outline_focus.execute({ node: '根' }, exec)
+check('outline_focus 接受中文哨兵 "根" → 回到整棵树',
+  JSON.parse(res).ok === true && JSON.parse(res).focus === '', res)
+await byName.outline_focus.execute({ node: 'Java/对象' }, exec)
+res = await byName.outline_focus.execute({ node: 'root' }, exec)
+check('outline_focus 接受英文哨兵 "root" → 回到整棵树（英文参数说明里的值）',
+  JSON.parse(res).ok === true && JSON.parse(res).focus === '', res)
+res = await byName.outline_focus.execute({ node: 'Java/对象' }, exec)
+
 res = await byName.outline_done.execute({ node: 'Java/对象/继承', note: 'is-a 关系，注意与组合区分' }, exec)
 check('outline_done 写摘要', JSON.parse(res).note.length > 0, res)
 

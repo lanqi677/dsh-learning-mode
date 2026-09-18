@@ -291,6 +291,25 @@ DSH 的**学习模式**：一棵由 AI 维护、可无限下钻的学习树。
 > 该包一旦改名/缺失，整个「学习模式」预设就加载失败（= 学习模式开不了会话），代价完全不对称。
 > 改为首次真正生成摘要时动态 import，拿不到就用内置最小实现兜底。
 
+## 多语言（i18n）
+
+插件的**全部文案跟随 DSH 当前语言**（内置 `zh` / `en`）：面板 UI、每轮注入给模型的指令、
+九个工具的描述与回执、摘要提示词、教程树种子，语言改了下一次调用就生效。
+
+约定是 **「中文原文就是字典的 key」**：代码里 `t('尚未绑定学习树')`，英文表
+`EN = { '尚未绑定学习树': 'No learning tree bound yet' }`，中文表由 EN 的 key 恒等派生。
+好处是**漏翻必被测试抓住**，且中文路径零改动（字典缺 key 时中文界面取到的就是 key 本身）。
+
+两边各有一份字典，因为 `lib/client.js` 不是 ESM（是 `window.__ModuleLoader__.load({factory})`
+的闭包模块，无法 `import './i18n.js'`）：宿主侧在 `lib/i18n.js`（`t`），浏览器侧内嵌在
+`lib/client.js`（`T`，⚠️ 大写，避免被文件里的局部 `t` 遮蔽）。
+
+已知限制两条：工具 `description` 由 `defineTool()` 在挂载时定型，**语言变更要等进程重启**
+（注入块/回执/摘要提示词是调用时取值，立刻跟着变）；`preset.yml` 只有纯文本
+`name`/`description`，没有 i18n 字段，所以预设显示名不随语言变。
+
+细节与踩坑（含 `t` 被局部变量遮蔽的地雷、兜底翻译必须插值）见 `../继续开发说明.md` §9 与坑 19。
+
 ## 自检
 
 ```bash
@@ -298,6 +317,7 @@ node test/smoke.mjs                # 数据层：建树 / 幂等 / 改结构 / �
 node test/mount.mjs                # 宿主半边集成：挂载 → 绑定 → 8 个工具 → 摘要管道 → 注入 → 面板 RPC
 node test/summary.mjs              # 摘要管道：门槛 / 生成 / 落盘 / 失败重试 / 冷却 / 窗口过滤
 node test/client.mjs               # 浏览器半边：注册座位 / 未开启会话 render null / 树视图 / 复习视图
+node test/i18n.mjs                 # 多语言守卫：key 齐不齐 / 英文值是不是真英文 / 占位符对齐 / 无重复 key
 node test/probe.mjs                # 最小挂载探针：确认 apply() 不抛错、8 个工具注册到位
 node scripts/validate-preset.mjs   # 预设里每个 row 的 name 是否可解析（加载失败的第一道防线）
 ```

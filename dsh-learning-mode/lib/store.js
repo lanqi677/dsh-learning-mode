@@ -18,11 +18,15 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { t } from './i18n.js'
 
 export const STATUS_TODO = 'todo'
 export const STATUS_DOING = 'doing'
 export const STATUS_DONE = 'done'
 
+// 教程树的默认标题。**刻意不在模块加载期翻译**：模块加载发生在 index.js
+// 的 setLocale() 之前，在这里求值会把标题固化成当时的语言（英文会话会拿到中文标题
+// 配英文节点）。真正播种时（buildTutorialTree）再取 t(...) 才是对的。
 export const TUTORIAL_TITLE = '如何使用学习模式'
 
 function nowIso() {
@@ -369,7 +373,7 @@ export class LearningStore {
       const base = slug(title)
       let id = base
       let n = 2
-      while (index.trees.some((t) => t.id === id)) { id = base + '-' + n; n += 1 }
+      while (index.trees.some((tr) => tr.id === id)) { id = base + '-' + n; n += 1 }
       const tree = { id, title: String(title).trim(), createdAt: nowIso(), nodes: [] }
       writeJson(this._treeFile(id), tree)
       index.trees.push({ id, title: tree.title, createdAt: tree.createdAt, lastUsedAt: null })
@@ -383,7 +387,7 @@ export class LearningStore {
       const tree = this.readTree(treeId)
       if (tree === null) return null
       const index = this._index()
-      const entry = index.trees.find((t) => t.id === treeId)
+      const entry = index.trees.find((tr) => tr.id === treeId)
       if (entry !== undefined) entry.lastUsedAt = nowIso()
       index.lastUsed = treeId
       writeJson(this.indexFile, index)
@@ -399,12 +403,12 @@ export class LearningStore {
   addNodes(sessionId, parentPath, items) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null || typeof binding.treeId !== 'string') return { error: '尚未绑定学习树，请先 outline_projects / outline_open' }
+      if (binding === null || typeof binding.treeId !== 'string') return { error: t('尚未绑定学习树，请先 outline_projects / outline_open') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失：' + binding.treeId }
+      if (tree === null) return { error: t('学习树文件缺失：{treeId}', { treeId: binding.treeId }) }
       const parent = findNode(tree, parentPath)
       if (parent === null && splitPath(parentPath).length > 0) {
-        return { error: '找不到父节点：' + parentPath }
+        return { error: t('找不到父节点：{path}', { path: parentPath }) }
       }
       const list = parent === null ? tree.nodes : parent.children
       const added = []
@@ -444,12 +448,12 @@ export class LearningStore {
   capture(sessionId, title, underPath, focusIt) {
     return this._serial(() => {
       const clean = String(title || '').trim()
-      if (clean === '') return { error: '标题为空' }
+      if (clean === '') return { error: t('标题为空') }
       const sessions = this._sessions()
       const binding = sessions[sessionId] || null
-      if (binding === null || typeof binding.treeId !== 'string') return { error: '尚未绑定学习树，请先 outline_projects / outline_open' }
+      if (binding === null || typeof binding.treeId !== 'string') return { error: t('尚未绑定学习树，请先 outline_projects / outline_open') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失：' + binding.treeId }
+      if (tree === null) return { error: t('学习树文件缺失：{treeId}', { treeId: binding.treeId }) }
 
       // 1) 已存在同名节点？→ 复用（不重复建、不搬家，避免破坏用户的结构）
       const existing = findAnywhere(tree, clean)
@@ -498,15 +502,15 @@ export class LearningStore {
   updateNode(sessionId, path, changes) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null) return { error: '尚未绑定学习树' }
+      if (binding === null) return { error: t('尚未绑定学习树') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失' }
+      if (tree === null) return { error: t('学习树文件缺失') }
       const node = findNode(tree, path)
-      if (node === null) return { error: '找不到节点：' + path }
+      if (node === null) return { error: t('找不到节点：{path}', { path: path }) }
       if (typeof changes.rename === 'string' && changes.rename.trim() !== '') node.title = changes.rename.trim()
       if (typeof changes.moveTo === 'string') {
         const parent = findNode(tree, changes.moveTo)
-        if (parent === null && splitPath(changes.moveTo).length > 0) return { error: '找不到目标父节点：' + changes.moveTo }
+        if (parent === null && splitPath(changes.moveTo).length > 0) return { error: t('找不到目标父节点：{path}', { path: changes.moveTo }) }
         const siblings = parent === null ? tree.nodes : parent.children
         const detach = (list) => {
           const at = list.findIndex((n) => n.id === node.id)
@@ -532,11 +536,11 @@ export class LearningStore {
   setStatus(sessionId, path, status, note) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null) return { error: '尚未绑定学习树' }
+      if (binding === null) return { error: t('尚未绑定学习树') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失' }
+      if (tree === null) return { error: t('学习树文件缺失') }
       const node = findNode(tree, path)
-      if (node === null) return { error: '找不到节点：' + path }
+      if (node === null) return { error: t('找不到节点：{path}', { path: path }) }
       const hadNote = typeof node.note === 'string' && node.note !== ''
       const canonical = pathOf(tree, node.id)
       // 摘要原料窗口在**改状态之前**取（窗口 = 该节点最后一次被聚焦的时间）
@@ -587,16 +591,16 @@ export class LearningStore {
   markOrigin(sessionId, path, origin) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null || typeof binding.treeId !== 'string') return { error: '尚未绑定学习树' }
+      if (binding === null || typeof binding.treeId !== 'string') return { error: t('尚未绑定学习树') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失' }
+      if (tree === null) return { error: t('学习树文件缺失') }
       const node = findNode(tree, path)
-      if (node === null) return { error: '找不到节点：' + path }
+      if (node === null) return { error: t('找不到节点：{path}', { path: path }) }
       const src = origin === null || origin === undefined ? {} : origin
       const sid = typeof src.sid === 'string' ? src.sid : ''
       const turn = Number(src.turn)
       const seq = Number(src.seq)
-      if (sid === '' || !Number.isFinite(turn) || !Number.isFinite(seq)) return { error: '来源坐标不完整' }
+      if (sid === '' || !Number.isFinite(turn) || !Number.isFinite(seq)) return { error: t('来源坐标不完整') }
       const entry = {
         sid,
         turn: Math.floor(turn),
@@ -635,21 +639,21 @@ export class LearningStore {
       if (map === null || map === undefined || typeof map !== 'object') return 0
       const iso = map[String(id)]
       if (typeof iso !== 'string') return 0
-      const t = Date.parse(iso)
-      return Number.isFinite(t) ? t : 0
+      const ts = Date.parse(iso)
+      return Number.isFinite(ts) ? ts : 0
     }
     const tree = typeof binding.treeId === 'string' ? this.readTree(binding.treeId) : null
     if (tree === null) return 0
     const self = at(nodeId)
     if (self > 0) return self
     for (const anc of ancestorIds(tree, nodeId)) {
-      const t = at(anc)
-      if (t > 0) return t
+      const ts = at(anc)
+      if (ts > 0) return ts
     }
     const node = findNodeById(tree, nodeId)
     if (node !== null && typeof node.createdAt === 'string') {
-      const t = Date.parse(node.createdAt)
-      if (Number.isFinite(t)) return t
+      const ts = Date.parse(node.createdAt)
+      if (Number.isFinite(ts)) return ts
     }
     return 0
   }
@@ -673,13 +677,13 @@ export class LearningStore {
   setNote(sessionId, path, note, meta) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null || typeof binding.treeId !== 'string') return { error: '尚未绑定学习树' }
+      if (binding === null || typeof binding.treeId !== 'string') return { error: t('尚未绑定学习树') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失' }
+      if (tree === null) return { error: t('学习树文件缺失') }
       const node = findNode(tree, path)
-      if (node === null) return { error: '找不到节点：' + path }
+      if (node === null) return { error: t('找不到节点：{path}', { path: path }) }
       const text = String(note || '').trim()
-      if (text === '') return { error: '摘要为空，已丢弃' }
+      if (text === '') return { error: t('摘要为空，已丢弃') }
       node.note = text
       node.noteAt = nowIso()
       node.noteState = 'done'
@@ -702,11 +706,11 @@ export class LearningStore {
   markNoteState(sessionId, path, state, detail) {
     return this._serial(() => {
       const binding = this.binding(sessionId)
-      if (binding === null || typeof binding.treeId !== 'string') return { error: '尚未绑定学习树' }
+      if (binding === null || typeof binding.treeId !== 'string') return { error: t('尚未绑定学习树') }
       const tree = this.readTree(binding.treeId)
-      if (tree === null) return { error: '学习树文件缺失' }
+      if (tree === null) return { error: t('学习树文件缺失') }
       const node = findNode(tree, path)
-      if (node === null) return { error: '找不到节点：' + path }
+      if (node === null) return { error: t('找不到节点：{path}', { path: path }) }
       node.noteState = String(state)
       if (state === 'failed') {
         node.noteTries = (Number(node.noteTries) || 0) + 1
@@ -774,11 +778,11 @@ export class LearningStore {
    */
   setFocusById(sessionId, nodeId) {
     const binding = this.binding(sessionId)
-    if (binding === null || typeof binding.treeId !== 'string') return Promise.resolve({ error: '尚未绑定学习树' })
+    if (binding === null || typeof binding.treeId !== 'string') return Promise.resolve({ error: t('尚未绑定学习树') })
     const tree = this.readTree(binding.treeId)
-    if (tree === null) return Promise.resolve({ error: '学习树文件缺失' })
+    if (tree === null) return Promise.resolve({ error: t('学习树文件缺失') })
     const node = findNodeById(tree, nodeId)
-    if (node === null) return Promise.resolve({ error: '找不到节点 id：' + String(nodeId) })
+    if (node === null) return Promise.resolve({ error: t('找不到节点 id：{id}', { id: String(nodeId) }) })
     return this.setFocus(sessionId, pathOf(tree, node.id))
   }
 
@@ -838,22 +842,23 @@ export class LearningStore {
     if (needsOpening) {
       const parts = []
       for (const entry of this.listTrees().slice(0, 5)) {
-        const t = this.readTree(entry.id)
-        const stat = t === null ? null : countNodes(t.nodes)
-        parts.push(entry.title + (stat === null ? '' : '（' + stat.total + ' 节点·' + shortDate(entry.lastUsedAt) + '）'))
+        const entryTree = this.readTree(entry.id)
+        const stat = entryTree === null ? null : countNodes(entryTree.nodes)
+        parts.push(stat === null
+          ? entry.title
+          : t('{title}（{total} 节点·{date}）', { title: entry.title, total: stat.total, date: shortDate(entry.lastUsedAt) }))
       }
-      opening.push('【现有学习树】' + (parts.length === 0 ? '（还没有树）' : parts.join('、')))
-      opening.push('【开场·只做一次】用户第一句若与上述某棵树相关 → 用 ask_user_question 出选项：'
-        + '第一个＝你推荐的那棵树（label 带「(Recommended)」），其后是其它相关的树，再给「新建一棵（名字建议：<从问题里提炼的主题>）」；'
-        + '用户也可以自己填。选完调 outline_open（已有树用 project，新建用 new），然后正常回答，不要再问第二次。'
-        + '若与任何老树都无关 → 同样用选项问：第一个＝你建议的树名，第二个＝让用户自己填名字。')
+      opening.push(t('【现有学习树】{list}', { list: parts.length === 0 ? t('（还没有树）') : parts.join(t('、')) }))
+      opening.push(t('【开场·只做一次】用户第一句若与上述某棵树相关 → 用 ask_user_question 出选项：第一个＝你推荐的那棵树（label 带「(Recommended)」），其后是其它相关的树，再给「新建一棵（名字建议：<从问题里提炼的主题>）」；用户也可以自己填。选完调 outline_open（已有树用 project，新建用 new），然后正常回答，不要再问第二次。若与任何老树都无关 → 同样用选项问：第一个＝你建议的树名，第二个＝让用户自己填名字。'))
     }
     // 还没绑树：只把开场提示给出去（否则模型没有树的标题可参考）
     if (tree === null) return opening.join('\n')
 
     const head = [
-      '## 学习模式',
-      '学习树：' + tree.title + (focusPath === '' ? '（尚未选择聚焦节点）' : ' ｜ ▶ 当前聚焦（用户正在看的）：' + focusPath),
+      t('## 学习模式'),
+      focusPath === ''
+        ? t('学习树：{title}（尚未选择聚焦节点）', { title: tree.title })
+        : t('学习树：{title} ｜ ▶ 当前聚焦（用户正在看的）：{path}', { title: tree.title, path: focusPath }),
       ...opening,
     ]
 
@@ -904,20 +909,23 @@ export class LearningStore {
 
     const render = (data, limit) => {
       const lines = head.slice()
-      if (data.current !== '') lines.push('【当前节点摘要】' + data.current)
+      if (data.current !== '') lines.push(t('【当前节点摘要】{note}', { note: data.current }))
       if (data.children.length > 0) {
-        lines.push('【子节点摘要】')
-        for (const child of data.children) lines.push('  · ' + child.title + '：' + child.note)
+        lines.push(t('【子节点摘要】'))
+        for (const child of data.children) lines.push(t('  · {title}：{note}', { title: child.title, note: child.note }))
       }
-      lines.push('【进度】已完成 ' + data.stat.done + '/' + data.stat.total)
-      if (data.pending.length > 0) lines.push('【这一层还没学完】' + data.pending.join('、'))
-      if (data.done.length > 0) lines.push('【最近完成】' + data.done.map((d) => d.title + '（' + shortDate(d.at) + '）').join('、'))
-      if (limit.hint && data.done.length > 0) lines.push('（复习用 outline_review 读摘要清单）')
+      lines.push(t('【进度】已完成 {done}/{total}', { done: data.stat.done, total: data.stat.total }))
+      if (data.pending.length > 0) lines.push(t('【这一层还没学完】{list}', { list: data.pending.join(t('、')) }))
+      if (data.done.length > 0) {
+        const recent = data.done.map((d) => t('{title}（{date}）', { title: d.title, date: shortDate(d.at) })).join(t('、'))
+        lines.push(t('【最近完成】{list}', { list: recent }))
+      }
+      if (limit.hint && data.done.length > 0) lines.push(t('（复习用 outline_review 读摘要清单）'))
       // 行动提示放在**最丰裕的一级**，超预算时第一个被砍掉。
       // 规则段里虽然写过，但在"行动当口"再点一句，模型跑偏/漏调 capture 的概率明显下降——
       // 这两条正是真机踩过的坑：vague 提问被答成别的知识点、以及 capture 漏调。
       if (limit.hint && data.hasFocus) {
-        lines.push('（用户没指明对象时＝上面那个"当前聚焦"；答完静默把新知识点 outline_capture 到聚焦节点下，**不要搬焦点**——焦点只跟着用户走）')
+        lines.push(t('（用户没指明对象时＝上面那个"当前聚焦"；答完静默把新知识点 outline_capture 到聚焦节点下，**不要搬焦点**——焦点只跟着用户走）'))
       }
       return lines.join('\n')
     }
@@ -966,29 +974,29 @@ function shortDate(iso) {
 function tutorialNodes() {
   const mk = (title, children) => ({ ...newNode(title), children: children || [] })
   return [
-    mk('① 问我：我要学 X，要学什么', [
-      mk('AI 会把清单直接生成到右侧的树里'),
-      mk('不用你手动建节点，也不用复制粘贴'),
+    mk(t('① 问我：我要学 X，要学什么'), [
+      mk(t('AI 会把清单直接生成到右侧的树里')),
+      mk(t('不用你手动建节点，也不用复制粘贴')),
     ]),
-    mk('② 你问什么我答什么，树顺着你的思路长', [
-      mk('由「数组」问到「计算机地址」，它就挂在数组下面'),
-      mk('不按教科书目录摆放——记录的是你当时怎么想的'),
-      mk('挂节点这件事我来做，你不用管、也不用确认'),
+    mk(t('② 你问什么我答什么，树顺着你的思路长'), [
+      mk(t('由「数组」问到「计算机地址」，它就挂在数组下面')),
+      mk(t('不按教科书目录摆放——记录的是你当时怎么想的')),
+      mk(t('挂节点这件事我来做，你不用管、也不用确认')),
     ]),
-    mk('③ 点节点标题 = 聚焦', [
-      mk('聚焦后，对话就围绕这个节点展开'),
-      mk('也可以直接对我说"我们来看继承"'),
+    mk(t('③ 点节点标题 = 聚焦'), [
+      mk(t('聚焦后，对话就围绕这个节点展开')),
+      mk(t('也可以直接对我说"我们来看继承"')),
     ]),
-    mk('④ 点 [✓ 学会] 标记完成', [
-      mk('标完成时我会自动写一句摘要（几秒后出现）'),
-      mk('再点一次撤销；点 ⟳ 可以让模型重写摘要'),
+    mk(t('④ 点 [✓ 学会] 标记完成'), [
+      mk(t('标完成时我会自动写一句摘要（几秒后出现）')),
+      mk(t('再点一次撤销；点 ⟳ 可以让模型重写摘要')),
     ]),
-    mk('⑤ 复习：点面板顶部的 [复习] 标签'),
-    mk('⑥ 想改结构（改名/移位/删除）直接跟我说'),
+    mk(t('⑤ 复习：点面板顶部的 [复习] 标签')),
+    mk(t('⑥ 想改结构（改名/移位/删除）直接跟我说')),
   ]
 }
 
 export function buildTutorialTree() {
   const createdAt = nowIso()
-  return { id: 'tutorial', title: TUTORIAL_TITLE, createdAt, nodes: tutorialNodes() }
+  return { id: 'tutorial', title: t('如何使用学习模式'), createdAt, nodes: tutorialNodes() }
 }
