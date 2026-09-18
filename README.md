@@ -21,7 +21,9 @@
 
 ![面板 · 树视图](docs/images/tree-view.png)
 
-*面板是玻璃浮层，可拖动 / 可调大小 / 记住你上次调的样子。顶部是进度与「上次看过后新增」。*
+*面板浮层：可拖动 / 可调大小 / 记住你上次调的样子。右上角下拉框切树或新建；顶部一行是**整棵树的进度**
+（这里 `1/45`）；每行右侧是「这一支的进度」角标与 [摘要] / [⟳ 重写摘要] / [✓ 学会]；加粗高亮那一行＝
+**当前聚焦**（▶），它右边的 [↩] 能跳回讲它的那一轮对话。*
 
 ### 一个真实例子：4 轮对话，长出一棵 45 个节点的论文树
 
@@ -35,8 +37,9 @@
 | 3 | `介绍` | 你没指明对象。每轮自动注入的上下文块里已经写着「▶ 当前聚焦（用户正在看的）：递归自我改进（RSI）的发现循环」，所以 AI 接着讲的就是**那个**节点 —— 不用复述上下文，也不会讲错 |
 | 4 | `介绍一下` | 继续顺着你的思路往下长 |
 
-4 轮之后：**45 个节点**。树记录的是**你当时的思路**（由「数组」问到「计算机地址」，
-就挂在数组下面），不是教科书目录。
+4 轮之后：**45 个节点**。它记录的是**你当时的思路**：你是从「瓶颈二：元策略空间巨大」往下追问的，
+所以「元策略是程序空间：无梯度、奖励稀疏」就挂在**瓶颈二**下面 —— 而不是被挪到某个"教科书上更该待"
+的位置。（这也是上面那条摘要的节点。）
 
 #### 点一下 [✓ 学会]
 
@@ -161,8 +164,11 @@ automatically given the right context, and one click takes you back to the turn 
 
 ![Panel · tree view](docs/images/tree-view.png)
 
-*A frosted-glass panel you can drag, resize, and that remembers how you left it.
-The header shows progress and what was added since you last looked.*
+*A frosted-glass panel: drag it, resize it, and it remembers your last layout. The dropdown in the
+top right switches or creates trees; the row under the tabs is the **whole tree's progress**
+(`1/45` here); each row carries a "this branch's progress" badge plus
+`[摘要] / [⟳ rewrite] / [✓ 学会]`; the highlighted row is the **current focus** (▶), and the [↩] next to
+it jumps back to the conversation turn that taught it.*
 
 > The screenshots on this page show the UI in Chinese because DSH is set to Chinese on this machine.
 > Every string in the panel — and in the model-facing instructions — is localised and follows DSH's
@@ -180,8 +186,11 @@ The header shows progress and what was added since you last looked.*
 | 3 | `介绍` ("explain it") | You named nothing. The context block that is injected every turn already said `▶ 当前聚焦（用户正在看的）：递归自我改进（RSI）的发现循环`, so the AI explained **that** node — **no restating of context, no drift** |
 | 4 | `介绍一下` | The tree kept growing along your train of thought |
 
-After 4 turns: **45 nodes**. The tree records **the path your thinking actually took**
-(you ask about "computer addresses" while on "arrays", so it hangs under arrays) — not a textbook outline.
+After 4 turns: **45 nodes**. It records **the path your thinking actually took**: because you dug
+down from "瓶颈二：元策略空间巨大" (*bottleneck two: the meta-policy space is huge*), the sub-topic
+"元策略是程序空间：无梯度、奖励稀疏" (*the meta-policy is a program space*) hangs **under bottleneck
+two** rather than wherever a textbook outline "should" put it. (That is the node whose summary is
+quoted below.)
 
 #### What clicking [✓ 学会] ("learned") does
 
