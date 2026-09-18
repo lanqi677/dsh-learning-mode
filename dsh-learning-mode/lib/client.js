@@ -410,7 +410,14 @@ window.__ModuleLoader__.load({
 			dim: "var(--dsw-alias-label-secondary, #9a9a9a)",
 			success: "var(--dsw-alias-state-success-primary, #4caf50)",
 			danger: "var(--dsw-alias-state-error-primary, #d9534f)",
-			brand: "var(--dsw-alias-brand-primary, #5b8def)"
+			brand: "var(--dsw-alias-brand-primary, #5b8def)",
+			// ⚠️ brand 的**配对视色**，不能拿 "#fff" 顶。
+			// --dsw-alias-brand-primary 是中性 brand：浅色 #0f1115（近黑）/ 暗色 #f9fafb（近白）。
+			// 所以"brand 底 + 固定白字"在暗色主题下就是**白底白字** —— NEW 角标会渲染成
+			// 一块没有文字的纯白色药丸（暗色模式真机实拍）。
+			// 设计系统里 button-primary-fill(= brand-primary) 的配对前景正是
+			// label-primary-foreground（浅色 #fff / 暗色 #0f1115），照它配两边都读得出来。
+			brandFg: "var(--dsw-alias-label-primary-foreground, #fff)"
 		};
 
 		// 一点点"软背景"：用主题色带透明度的写法（to 关键字在旧浏览器不认，用 rgba 兜底）
@@ -539,7 +546,7 @@ window.__ModuleLoader__.load({
 			},
 			badgeNew: {
 				flex: "0 0 auto", fontSize: "9px", lineHeight: "15px", padding: "0 5px", borderRadius: "8px",
-				background: V.brand, color: "#fff", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap"
+				background: V.brand, color: V.brandFg, fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap"
 			},
 			badgeBusy: {
 				flex: "0 0 auto", fontSize: "10px", lineHeight: "15px", padding: "0 5px", borderRadius: "8px",

@@ -231,6 +231,20 @@ function propsByClass(node, className) {
   return propsByClass(node.children, className)
 }
 
+/** 按文本内容找第一个元素的 props（NEW 角标这种没有 className、只有样式和文字）。 */
+function propsByText(node, text) {
+  if (node === null || node === undefined || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const child of node) { const hit = propsByText(child, text); if (hit !== null) return hit }
+    return null
+  }
+  if (node.__el !== true) return null
+  const kids = Array.isArray(node.children) ? node.children : [node.children]
+  if (kids.some((k) => k === text)) return node.props
+  if (typeof node.type === 'function') return propsByText(node.type(node.props), text)
+  return propsByText(node.children, text)
+}
+
 const Chip = registrations[0].component
 const TREE = {
   id: 'tutorial',
@@ -370,10 +384,26 @@ check('点按钮：发出 op=seen（把水位线落盘）', fetchCalls.some((c) 
 
 // 面板开着 + 冻结水位线 → 树里标 NEW、"新增 N 个"提示、折叠的父分支被强制展开
 hookQueue = [STATE_WITH_NEW, '', 'panel', 'tree', null, {}, { n1: true }, '2026-09-17T00:00:00.000Z']
-const marked = textOf(Chip({ sessionId: 's1' }))
+const markedEl = Chip({ sessionId: 's1' })
+const marked = textOf(markedEl)
 check('面板里标出 NEW 角标', marked.includes('NEW'), marked.slice(0, 400))
 check('面板顶部提示"新增 N 个知识点"', marked.includes('新增 1 个知识点'), marked.slice(0, 400))
 check('新增节点的折叠父分支被强制展开（否则看不见新增）', marked.includes('新知识点'), marked.slice(0, 400))
+
+// ── 暗色主题回归：NEW 角标的"底色 / 文字色"必须是一对主题变量 ────────────────
+// 真机实拍 bug：角标写的是 background: brand + **硬编码 color:"#fff"**。
+// --dsw-alias-brand-primary 是中性 brand（浅色 #0f1115 近黑 / 暗色 #f9fafb 近白），
+// 于是暗色主题下变成"白底白字"，角标渲染成一块没有文字的纯白色药丸。
+// 上面那条 `marked.includes('NEW')` 是纯文本断言，白底白字照样通过 —— 所以必须断言样式。
+const newBadge = propsByText(markedEl, 'NEW')
+check('NEW 角标带样式（不是裸文字）', newBadge !== null && newBadge.style !== undefined, newBadge)
+check('NEW 角标底色跟主题 brand 走',
+  newBadge !== null && String(newBadge.style.background).includes('--dsw-alias-brand-primary'),
+  newBadge && newBadge.style.background)
+const newBadgeColor = newBadge === null ? '' : String(newBadge.style.color)
+check('NEW 角标文字色用主题配对前景色，不硬编码 #fff',
+  newBadgeColor.startsWith('var(') && newBadgeColor.includes('--dsw-alias-label-primary-foreground'),
+  newBadgeColor)
 
 // 关掉再开：水位线已推进 → 不再标 NEW（标记是算出来的，不是存出来的）
 hookQueue = [STATE_WITH_NEW, '', 'panel', 'tree', null, {}, {}, '2026-09-18T00:00:00.000Z']
