@@ -1,6 +1,6 @@
 # dsh-learning-mode · DSH 学习模式
 
-给 [DSH](https://github.com/)（DeepSeek Harness）用的 agent 插件：一棵由 AI 维护、**可无限下钻的学习树**。
+给 [DSH](https://github.com/deepseek-ai/deepseek-harness)（DeepSeek Harness）用的 agent 插件：一棵由 AI 维护、**可无限下钻的学习树**。
 
 它解决的是一个很具体的痛点：**学习时钻进支线，回头找不到原来的位置**。
 复习链表时看到"跳表"就去研究跳表，研究完要翻很久聊天记录才能回到链表；
